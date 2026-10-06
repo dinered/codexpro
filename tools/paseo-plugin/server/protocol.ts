@@ -70,10 +70,11 @@ async function syncDir(dir: string) {
 }
 
 // Читает обычный файл, не следуя по ссылке. Нет файла — null; ссылка или не файл — ошибка.
+// O_NONBLOCK: подложенный FIFO не подвесит open(), а дальше его отсечёт проверка isFile().
 export async function readRegular(path: string): Promise<string | null> {
   let file;
   try {
-    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
     if (errno(error) === "ENOENT") return null;
     if (errno(error) === "ELOOP") throw new Error(`ссылка вместо файла: ${path}`);

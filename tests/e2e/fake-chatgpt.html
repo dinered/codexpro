@@ -1,62 +1,153 @@
 <!doctype html>
 <meta charset="utf-8" />
-<title>fake ChatGPT</title>
-<!-- Имитация разметки ChatGPT (2026-10-06) для тестов моста: те же селекторы, что SEL в tools/chatgpt-bridge/bridge.ts.
-     Отправка — пара [data-turn-key] с сообщением; ответ «Эхо: <сообщение>» идёт по букве раз в ?ms= миллисекунд,
-     пока он идёт, вместо «Отправить» видна кнопка «Остановить». -->
+<title>ChatGPT</title>
+<!-- Имитация ChatGPT для тестов моста. Разметка — по замеру живого чата 2026-10-06 (русский интерфейс), селекторы —
+     SEL в tools/chatgpt-bridge/bridge.ts: поменялась разметка — править и там, и здесь. Тесты подставляют страницу
+     по адресу https://chatgpt.com/c/fake-test (page.route), в сеть ничего не уходит.
+     Enter — пара [data-turn-key]: пузырь с текстом и ответ «Эхо: …» с Markdown-разметкой, по букве раз в ?ms= мс (10);
+     пока ответ идёт, вместо «Отправить» — «Остановить», в конце — панель действий с «Сгенерировать ответ заново».
+     ?think=мс — сначала «Думаю…»; ?pause=мс — пауза посреди ответа, «Остановить» на экране; ?hang — первый ответ
+     не кончается; ?noanswer — первое сообщение принято, ответа нет; ?busy — «Остановить» на экране с самого начала;
+     ?keep=N — в DOM только N последних пар (длинный чат выгружает старые).
+     window.sent — отправленные тексты, window.stopped — нажатия «Остановить». -->
 <style>
-  [data-markdown-text-style] { white-space: pre-wrap; }
+  [contenteditable] { min-height: 2em; border: 1px solid #999; }
+  [data-user-message-bubble] { white-space: pre-wrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>
 <main></main>
 <form>
+  <button type="button" aria-label="Добавить файлы и другое">+</button>
   <div data-composer-input>
-    <div class="ProseMirror" role="textbox" contenteditable="true" aria-label="Спросить ChatGPT"></div>
+    <div class="ProseMirror" contenteditable="true" role="textbox" aria-label="Спросить ChatGPT"></div>
   </div>
-  <button type="submit" aria-label="Отправить">↑</button>
-  <button type="button" aria-label="Остановить" hidden>■</button>
+  <button type="button" aria-label="Выбрать модель ChatGPT">5</button>
+  <button type="button" aria-label="Диктовать">🎙</button>
+  <span></span>
 </form>
 <script>
-  const ms = Number(new URLSearchParams(location.search).get("ms") || 10);
+  const q = new URLSearchParams(location.search);
+  const ms = Number(q.get("ms") ?? 10);
+  const think = Number(q.get("think") ?? 0);
+  const pause = Number(q.get("pause") ?? 0);
+  const keep = Number(q.get("keep") ?? 0);
+  const main = document.querySelector("main");
+  const form = document.querySelector("form");
   const box = document.querySelector("[contenteditable]");
-  const send = document.querySelector("[aria-label=Отправить]");
-  const stop = document.querySelector("[aria-label=Остановить]");
-  let timer;
+  const slot = form.lastElementChild;
+  const sleep = (t) => new Promise((resolve) => setTimeout(resolve, t));
+  const buttons = (...labels) => labels.map((label) => `<button type="button" aria-label="${label}"></button>`).join("");
+
+  // Ответ: эхо сообщения и всё, что конвертер моста переводит в Markdown (ожидаемый текст — reply() в bridge.spec.ts).
+  // Между тегами без пробелов, как у живого.
+  const REPLY =
+    "<p></p><h3>Итог</h3>" +
+    "<ul><li>первый пункт<ul><li>вложенный пункт</li></ul></li><li>второй с <code>кодом</code></li></ul>" +
+    "<ol><li>раз</li><li>два</li></ol>" +
+    '<pre><div><span>bash</span><button type="button">Копировать</button></div>' +
+    '<div><code class="language-bash">echo привет\nls -la</code></div></pre>' +
+    "<table><thead><tr><th>Ключ</th><th>Значение</th></tr></thead><tbody><tr><td>a</td><td>1</td></tr></tbody></table>" +
+    "<blockquote><p>цитата</p></blockquote><hr>" +
+    '<p>Ссылка: <a href="https://example.com/">пример</a>, <strong>жирный</strong> и <em>курсив</em>.</p>';
+
   window.sent = [];
   window.stopped = 0;
-  const streaming = (on) => {
-    send.hidden = on;
-    stop.hidden = !on;
-  };
-  box.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter — перенос строки
-    event.preventDefault();
+  let generating = q.has("busy");
+  let generation = 0; // конец ответа и «Остановить» меняют номер — идущий ответ это видит и замирает
+  let current = null; // пара, на которую идёт ответ
+
+  // Последняя кнопка формы, как у живого: пусто — голосовой разговор, есть текст — «Отправить», идёт ответ — «Остановить».
+  function render() {
+    const [type, label] = generating
+      ? ["button", "Остановить"]
+      : box.innerText.trim()
+        ? ["submit", "Отправить"]
+        : ["button", "Начать голосовой разговор"];
+    slot.innerHTML = `<button type="${type}" aria-label="${label}">●</button>`;
+  }
+
+  // Конец ответа, сам или по «Остановить»: «Думаю…» и маркер анимации уходят, под ответом — панель действий.
+  function finish() {
+    generation++;
+    generating = false;
+    if (current) {
+      current.querySelectorAll('[data-markdown-text-tone="tertiary"]').forEach((el) => el.remove());
+      current.querySelectorAll("[data-markdown-animated]").forEach((el) => el.removeAttribute("data-markdown-animated"));
+      const actions = buttons("Копировать", "Поделиться", "Прочитать вслух", "Сгенерировать ответ заново", "Ещё действия");
+      current.insertAdjacentHTML("beforeend", `<div>${actions}</div>`);
+      current = null;
+    }
+    render();
+  }
+
+  function send() {
     const text = box.innerText.trim();
+    if (!text || generating) return;
     box.replaceChildren();
     window.sent.push(text);
     const turn = document.createElement("div");
-    turn.dataset.turnKey = `turn-${window.sent.length}`;
-    turn.innerHTML = "<div data-user-message-bubble></div>";
-    turn.firstChild.textContent = text;
-    document.querySelector("main").append(turn);
-    const reply = `Эхо: ${text}`;
-    let i = 0;
-    let answer;
-    streaming(true);
-    timer = setInterval(() => {
-      if (!answer) {
-        turn.insertAdjacentHTML("beforeend", '<h4 data-conversation-role="assistant">ChatGPT сказал:</h4><div data-markdown-text-style="assistant-message"></div>');
-        answer = turn.lastChild;
+    turn.dataset.turnKey = crypto.randomUUID();
+    turn.innerHTML =
+      "<div data-user-message-bubble></div>" +
+      `<div>${buttons("Скопировать сообщение", "Поделиться промптом", "Редактировать сообщение")}</div>`;
+    turn.firstChild.textContent = text.replaceAll("`", ""); // пузырь рисует Markdown: `код` — без кавычек
+    main.append(turn);
+    if (keep) while (main.children.length > keep) main.firstElementChild.remove();
+    if (q.has("noanswer") && window.sent.length === 1) return render();
+    respond(turn, text);
+  }
+
+  async function respond(turn, text) {
+    const gen = ++generation;
+    generating = true;
+    current = turn;
+    render();
+    turn.insertAdjacentHTML("beforeend", '<h4 data-conversation-role="assistant" class="sr-only">ChatGPT сказал:</h4>');
+    if (think) {
+      turn.insertAdjacentHTML(
+        "beforeend",
+        '<div data-markdown-text-style="assistant-message" data-markdown-text-tone="tertiary" data-markdown-animated>Думаю…</div>',
+      );
+      await sleep(think);
+      if (gen !== generation) return;
+    }
+    // маркер анимации здесь на обёртке ответа, у «Думаю…» — на самом блоке: у живого бывает и так, и так
+    turn.insertAdjacentHTML("beforeend", `<div data-markdown-animated><div data-markdown-text-style="assistant-message">${REPLY}</div></div>`);
+    const block = turn.lastChild.firstChild;
+    block.firstChild.textContent = `Эхо: ${text.replaceAll("`", "").replace(/\s+/g, " ")}`;
+    // текст идёт по букве: сначала все текстовые узлы пустые
+    const nodes = [];
+    for (const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT); walk.nextNode(); ) {
+      nodes.push([walk.currentNode, walk.currentNode.data]);
+    }
+    for (const [node] of nodes) node.data = "";
+    const half = Math.floor(nodes.reduce((sum, [, full]) => sum + full.length, 0) / 2);
+    let shown = 0;
+    for (const [node, full] of nodes) {
+      for (let i = 1; i <= full.length; i++) {
+        await sleep(++shown === half && pause ? pause : ms);
+        if (gen !== generation) return;
+        node.data = full.slice(0, i);
       }
-      answer.textContent = reply.slice(0, ++i);
-      if (i >= reply.length) {
-        clearInterval(timer);
-        streaming(false);
-      }
-    }, ms);
+    }
+    if (q.has("hang") && window.sent.length === 1) return; // «Остановить» так и висит
+    finish();
+  }
+
+  box.addEventListener("input", render);
+  box.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter — перенос строки
+    event.preventDefault();
+    send();
   });
-  stop.addEventListener("click", () => {
-    clearInterval(timer);
-    streaming(false);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    send();
+  });
+  form.addEventListener("click", (event) => {
+    if (!event.target.closest('[aria-label="Остановить"]')) return;
     window.stopped++;
+    finish();
   });
+  render();
 </script>

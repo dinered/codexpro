@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,12 +35,14 @@ describe("протокол v2", () => {
     expect((await readdir(dir)).sort()).toEqual(["outside.txt", "reply.md"]);
   });
 
-  it("readRegular: нет файла — null, ссылка вместо файла — ошибка", async () => {
+  it("readRegular: нет файла — null, ссылка вместо файла — ошибка, FIFO — ошибка без зависания", async () => {
     const dir = await tempDir();
     expect(await readRegular(join(dir, "nope"))).toBeNull();
     await writeFile(join(dir, "secret"), "ключ");
     await symlink(join(dir, "secret"), join(dir, "task.md"));
     await expect(readRegular(join(dir, "task.md"))).rejects.toThrow(/ссылка/);
+    execFileSync("mkfifo", [join(dir, "reply.md")]);
+    await expect(readRegular(join(dir, "reply.md"))).rejects.toThrow(/не обычный файл/);
   });
 
   it("isFresh: свежий файл — да; старый, ссылка или нет файла — нет", async () => {

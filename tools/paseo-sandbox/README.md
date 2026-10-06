@@ -47,12 +47,13 @@ docker exec --user paseo paseo-sandbox paseo plugin reload codexpro-worker
 
 ```sh
 docker exec --user paseo paseo-sandbox paseo run -d --provider codexpro/chatgpt --cwd /workspace "Короткая задача"
-ls $S/../sandbox/.ai-bridge/paseo/*/task.md                  # задача появилась
-echo "Ответ из песочницы" > $S/../sandbox/.ai-bridge/paseo/<id>/reply.md
+ls $S/../sandbox/.ai-bridge/paseo/*/task-*.md                # задача появилась: <сессия>/task-<id>.md
+echo "Ответ из песочницы" > $S/../sandbox/.ai-bridge/paseo/<сессия>/reply-<id>.md
 docker exec --user paseo paseo-sandbox paseo logs <агент>    # ответ есть, ход завершён
 ```
 
-Без `-d` `paseo run` ждёт завершения хода, то есть появления `reply.md`.
+Без `-d` `paseo run` ждёт завершения хода, то есть появления `reply-<id>.md`.
+Имена файлов и правила обмена — `tools/paseo-plugin/README.md`.
 
 ## Остановка и удаление
 

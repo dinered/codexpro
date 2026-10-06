@@ -69,9 +69,17 @@ nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
 curl -s http://127.0.0.1:9222/json/version    # ответил — Chrome готов
 ```
 
-CDP слушает только `127.0.0.1`. Флаг `--remote-allow-origins` не нужен:
-Playwright подключается без него, а `*` снимает защиту от подключения со
-страниц сайтов.
+CDP слушает `127.0.0.1`, но **контейнеры OrbStack до него достают**: OrbStack
+пересылает их запросы на `host.docker.internal` (`0.250.250.254`) в
+`127.0.0.1` Мака. Проверено 2026-10-06 из `paseo-sandbox`: `/json/version`
+отвечает `200`. Пароля у CDP нет — значит, любой процесс в любом контейнере
+может управлять этим Chrome: входом в ChatGPT и всеми его подключениями (в том
+числе боевым `CodexPro` на ct116). Поэтому, пока этот Chrome запущен,
+`codexpro-sandbox` (ChatGPT с bash) не запускать, а в `paseo-sandbox` не
+создавать агентов, которые выполняют команды.
+
+Флаг `--remote-allow-origins` не нужен: Playwright подключается без него, а `*`
+снимает защиту от подключения со страниц сайтов.
 
 Подключение из Playwright:
 

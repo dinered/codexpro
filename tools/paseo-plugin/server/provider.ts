@@ -6,20 +6,33 @@ import {
   type ProviderInput,
   type ProviderRegistration,
 } from "@getpaseo/plugin/server/provider";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, readdir, rm, unlink } from "node:fs/promises";
+import { join, relative } from "node:path";
+import {
+  BRIDGE_LOCK,
+  fileName,
+  isFresh,
+  newTaskId,
+  parseName,
+  pulse,
+  PULSE_MS,
+  readRegular,
+  tasksRoot,
+  writeAtomic,
+  type Kind,
+} from "./protocol";
 
 const CAPABILITIES = ["prompt.message"] as const;
 const MODELS = [{ id: "chatgpt", label: "ChatGPT (веб, через CodexPro)" }];
 
 interface Session {
   cwd: string;
-  box: string;
+  dir: string; // папка сессии: <cwd>/.ai-bridge/paseo/<сессия>
   turns: number;
-  active: { turnId: string; timer?: ReturnType<typeof setTimeout> } | null;
+  active: { turnId: string; id: string; timer?: ReturnType<typeof setTimeout> } | null; // id — в именах файлов хода
 }
 
-export function createCodexproProvider({ pollMs = 1000 } = {}): ProviderRegistration {
+export function createCodexproProvider({ pollMs = 1000, pulseMs = PULSE_MS } = {}): ProviderRegistration {
   return {
     id: "codexpro",
     label: "ChatGPT (CodexPro)",
@@ -27,12 +40,12 @@ export function createCodexproProvider({ pollMs = 1000 } = {}): ProviderRegistra
     async connect(request) {
       if (!request.versions.includes(1)) throw new Error("Нужна версия 1 протокола провайдера");
       const capabilities = negotiateProviderCapabilities(request.capabilities, CAPABILITIES);
-      return createConnection(capabilities, pollMs);
+      return createConnection(capabilities, pollMs, pulseMs);
     },
   };
 }
 
-function createConnection(capabilities: readonly string[], pollMs: number): ProviderConnection {
+function createConnection(capabilities: readonly string[], pollMs: number, pulseMs: number): ProviderConnection {
   const listeners = new Set<(event: ProviderEvent) => void>();
   const sessions = new Map<string, Session>();
   let closed = false;
@@ -40,18 +53,18 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
     if (!closed) for (const listener of listeners) listener(event);
   };
 
+  // Конец хода: событие в Paseo и уборка всех файлов его id (задача, захват моста, ответ, ошибка).
   function finishTurn(sessionId: string, state: "completed" | "failed" | "canceled", error?: string) {
     const session = sessions.get(sessionId);
     if (!session?.active) return;
-    const { turnId, timer } = session.active;
+    const { turnId, id, timer } = session.active;
     clearTimeout(timer);
     session.active = null;
     emit({ type: "session.turn", sessionId, turnId, state, ...(error && { error: { message: error } }) });
+    return sweep(session.dir, (other) => other === id);
   }
 
-  const clearBox = (session: Session) =>
-    Promise.all(["task.md", "reply.md"].map((file) => rm(join(session.cwd, session.box, file), { force: true })));
-
+  // Ход по протоколу v2 (protocol.ts): task-<id>.md с пульсом → исполнитель → reply-<id>.md или error-<id>.md.
   async function prompt({ sessionId, prompt }: Extract<ProviderInput, { type: "session.prompt" }>) {
     const session = sessions.get(sessionId)!;
     const result = (value: Extract<ProviderEvent, { type: "session.prompt_result" }>["result"]) =>
@@ -63,7 +76,8 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
 
     const text = prompt.input.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
     const turnId = `turn-${++session.turns}`;
-    session.active = { turnId };
+    const id = newTaskId();
+    session.active = { turnId, id };
     emit({
       type: "timeline.item",
       sessionId,
@@ -72,17 +86,20 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
     result({ type: "turn", turnId });
     emit({ type: "session.turn", sessionId, turnId, state: "started" });
 
-    const task = join(session.box, "task.md");
-    const reply = join(session.box, "reply.md");
+    const file = (kind: Kind) => join(session.dir, fileName(kind, id));
+    const shown = (kind: Kind) => relative(session.cwd, file(kind)); // в подсказке — от рабочей папки
+    let writeError: string | null = null;
+    let bridge = false;
     try {
-      await mkdir(join(session.cwd, session.box), { recursive: true });
-      await rm(join(session.cwd, reply), { force: true });
+      await mkdir(session.dir, { recursive: true });
       // ровно текст сообщения: его отправляет в ChatGPT мост tools/chatgpt-bridge; куда писать ответ — в подсказке ниже
-      await writeFile(join(session.cwd, task), text);
+      await writeAtomic(file("task"), text);
+      bridge = await isFresh(join(tasksRoot(session.cwd), BRIDGE_LOCK)); // живой мост пульсирует свой замок
     } catch (error) {
-      return finishTurn(sessionId, "failed", `Не удалось записать задачу: ${String(error)}`);
+      writeError = `Не удалось записать задачу: ${String(error)}`;
     }
-    if (session.active?.turnId !== turnId) return clearBox(session);
+    if (session.active?.turnId !== turnId) return sweep(session.dir, (other) => other === id); // «Стоп» во время записи
+    if (writeError) return finishTurn(sessionId, "failed", writeError);
 
     emit({
       type: "timeline.item",
@@ -90,34 +107,48 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
       item: {
         type: "assistant_message",
         id: `wait-${turnId}`,
-        text:
-          `Задача ждёт ChatGPT: \`${task}\`. Вставьте в ChatGPT с плагином CodexPro:\n\n` +
-          "```text\n" +
-          `Use CodexPro Sandbox. Прочитай ${task} и выполни задачу в этом репозитории. ` +
-          `Итоговый ответ запиши одним вызовом write в ${reply}.\n` +
-          "```",
+        text: bridge
+          ? `Задача ушла мосту в ChatGPT: \`${shown("task")}\``
+          : `Задача ждёт ChatGPT: \`${shown("task")}\`. Вставьте в ChatGPT с плагином CodexPro:\n\n` +
+            "```text\n" +
+            `Use CodexPro Sandbox. Прочитай ${shown("task")} и выполни задачу в этом репозитории. ` +
+            `Итоговый ответ запиши одним вызовом write в ${shown("reply")}.\n` +
+            "```",
       },
     });
 
-    // ponytail: опрос файла раз в pollMs (fs.watch ненадёжен на томах Docker); ответ виден с задержкой до 2×pollMs
-    let lastSize = -1;
+    // ponytail: опрос папки раз в pollMs (fs.watch ненадёжен на томах Docker); ответ виден с задержкой до 2×pollMs
+    let last: string | null = null;
+    let pulsed = Date.now();
     const tick = async () => {
+      let failure: string | null = null;
+      let answer: string | null = null;
+      let gone = false;
       try {
-        const size = await sizeOf(join(session.cwd, reply));
-        if (session.active?.turnId !== turnId) return;
-        if (size > 0 && size === lastSize) {
-          const answer = await readFile(join(session.cwd, reply), "utf8");
-          if (session.active?.turnId !== turnId) return;
-          emit({ type: "timeline.item", sessionId, item: { type: "assistant_message", id: `reply-${turnId}`, text: answer } });
-          finishTurn(sessionId, "completed");
-          await clearBox(session);
-          return;
+        // файлы чужих id — остатки прошлых ходов; «чужой» — относительно активного хода в момент удаления:
+        // опрос, запоздавший после «Стоп», не тронет задачу следующего хода
+        await sweep(session.dir, (other) => other !== session.active?.id);
+        failure = await readRegular(file("error"));
+        answer = await readRegular(file("reply"));
+        // пульс, пока ответа нет: исполнитель берёт и держит только задачу со свежим пульсом
+        if (!answer && Date.now() - pulsed >= pulseMs) {
+          gone = !(await lstat(file("task")).catch(() => null))?.isFile();
+          if (!gone) await pulse(file("task"));
+          pulsed = Date.now();
         }
-        lastSize = size;
-        session.active.timer = setTimeout(tick, pollMs);
       } catch (error) {
-        finishTurn(sessionId, "failed", `Не удалось прочитать ответ: ${String(error)}`);
+        failure = `Не удалось прочитать ответ: ${String(error)}`;
       }
+      if (session.active?.turnId !== turnId) return;
+      if (failure !== null) return finishTurn(sessionId, "failed", failure.trim() || "Исполнитель не выполнил задачу");
+      if (gone) return finishTurn(sessionId, "failed", "файл задачи удалён");
+      // человек или CodexPro пишут ответ не атомарно: берём, когда он не менялся между двумя опросами
+      if (answer && answer === last) {
+        emit({ type: "timeline.item", sessionId, item: { type: "assistant_message", id: `reply-${turnId}`, text: answer } });
+        return finishTurn(sessionId, "completed");
+      }
+      last = answer;
+      session.active.timer = setTimeout(tick, pollMs);
     };
     session.active.timer = setTimeout(tick, pollMs);
   }
@@ -129,8 +160,8 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
         emit({ type: "catalog", requestId: input.requestId, catalog: { models: MODELS, modes: [], defaultModel: "chatgpt" } });
         return;
       case "session.open": {
-        const box = join(".ai-bridge", "paseo", input.sessionId.replace(/[^\w-]/g, "_"));
-        sessions.set(input.sessionId, { cwd: input.config.cwd, box, turns: 0, active: null });
+        const dir = join(tasksRoot(input.config.cwd), input.sessionId.replace(/[^\w-]/g, "_"));
+        sessions.set(input.sessionId, { cwd: input.config.cwd, dir, turns: 0, active: null });
         const { requestId, sessionId } = input;
         emit({
           type: "session.opened",
@@ -152,16 +183,15 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
       case "session.prompt":
         return prompt(input);
       case "session.interrupt": {
-        finishTurn(input.sessionId, "canceled");
-        await clearBox(sessions.get(input.sessionId)!);
+        await finishTurn(input.sessionId, "canceled");
         emit({ type: "request.completed", requestId: input.requestId });
         return;
       }
       case "session.close": {
         const session = sessions.get(input.sessionId)!;
-        finishTurn(input.sessionId, "canceled");
+        void finishTurn(input.sessionId, "canceled"); // файлы хода уйдут вместе с папкой ниже
         sessions.delete(input.sessionId);
-        await rm(join(session.cwd, session.box), { recursive: true, force: true });
+        await rm(session.dir, { recursive: true, force: true });
         emit({ type: "session.closed", sessionId: input.sessionId });
         emit({ type: "request.completed", requestId: input.requestId });
         return;
@@ -192,18 +222,21 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
     async close() {
       if (closed) return;
       closed = true;
-      for (const session of sessions.values()) clearTimeout(session.active?.timer);
+      for (const session of sessions.values()) {
+        clearTimeout(session.active?.timer);
+        session.active = null; // опрос в полёте не перезапустится и не продлит пульс задачи
+      }
       sessions.clear();
       listeners.clear();
     },
   };
 }
 
-async function sizeOf(file: string): Promise<number> {
-  try {
-    return (await stat(file)).size;
-  } catch (error) {
-    if ((error as { code?: unknown }).code === "ENOENT") return -1;
-    throw error;
+// Удаляет в папке сессии файлы протокола с подходящим id. Best effort: задачу без пульса
+// исполнитель не возьмёт, а файлы чужих id плагин не читает.
+async function sweep(dir: string, match: (id: string) => boolean) {
+  for (const name of await readdir(dir).catch(() => [])) {
+    const file = parseName(name);
+    if (file && match(file.id)) await unlink(join(dir, name)).catch(() => {});
   }
 }
