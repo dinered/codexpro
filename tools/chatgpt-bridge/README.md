@@ -71,7 +71,8 @@
    chatgpt.com должна быть ровно одна.
 2. Песочница Paseo с плагином — `tools/paseo-sandbox/README.md`; как открыть
    Paseo и создать агента — `tools/paseo-plugin/README.md`.
-3. Мост (перед подключением сам проверит, что выход в интернет — `FOREIGN_STRICT`):
+3. Мост (перед подключением сам проверит, что выход в интернет — `FOREIGN_STRICT`
+   и что `codexpro-sandbox` не запущен: из контейнеров виден CDP этого Chrome):
 
    ```sh
    cd tools/chatgpt-bridge && npm ci

@@ -1,5 +1,6 @@
 // Запуск моста: node main.ts [каталог .ai-bridge/paseo] [--limit N]. Chrome с ChatGPT — tools/codexpro-sandbox/README.md.
 import { chromium } from "playwright-core";
+import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { get, type IncomingMessage } from "node:http";
 import { homedir } from "node:os";
@@ -32,6 +33,13 @@ const root = positionals[0] ?? join(homedir(), "work/ai/codexpro/2/sandbox/.ai-b
 
 const now = await foreignNow().catch((error) => fail(`не удалось спросить mihomo (${MIHOMO}): ${error.message}`));
 if (now !== "FOREIGN_STRICT") fail(`группа FOREIGN в mihomo стоит на «${now}», нужен FOREIGN_STRICT — мост не запускаю`);
+
+// Контейнеры OrbStack достают до CDP Мака (host.docker.internal → 127.0.0.1:9222), а в codexpro-sandbox
+// ChatGPT выполняет команды: пока он запущен, мост к Chrome с входом в ChatGPT не подключается.
+const codexpro = await new Promise<string>((resolve) =>
+  execFile("docker", ["inspect", "-f", "{{.State.Running}}", "codexpro-sandbox"], (_, stdout) => resolve(String(stdout).trim())),
+);
+if (codexpro === "true") fail("запущен codexpro-sandbox, а он видит CDP этого Chrome; остановите: docker stop codexpro-sandbox");
 
 await mkdir(root, { recursive: true }); // мост запускают до первой задачи: плагин папку мог ещё не создать
 // Только подключение к уже открытому Chrome: свой запуск браузера выбивает вход в ChatGPT.
