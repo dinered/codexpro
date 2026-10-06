@@ -1,0 +1,5 @@
+{
+  "id": "codexpro-worker",
+  "description": "ChatGPT через CodexPro как воркер Paseo: задача и ответ — файлы в .ai-bridge/",
+  "requirements": { "paseo": ">=0.11.0-beta.3" }
+}
