@@ -1,0 +1,9 @@
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "merge_train_event"
+smoke:
+  stage: test
+  tags: [merge-train-smoke]
+  script:
+    - echo smoke ok
