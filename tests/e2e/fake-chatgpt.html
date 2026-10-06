@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>fake ChatGPT</title>
+<!-- Имитация разметки ChatGPT для тестов моста: те же селекторы, что SEL в tools/chatgpt-bridge/bridge.ts.
+     Отвечает «Эхо: <сообщение>» по букве раз в ?ms= миллисекунд; пока идёт ответ, видна кнопка «Стоп». -->
+<style>
+  [data-markdown-text-style] { white-space: pre-wrap; }
+</style>
+<main></main>
+<form>
+  <div data-composer-input>
+    <div class="ProseMirror" role="textbox" contenteditable="true" aria-label="Спросить ChatGPT"></div>
+  </div>
+  <button type="button" data-testid="stop-button" hidden>Стоп</button>
+</form>
+<script>
+  const ms = Number(new URLSearchParams(location.search).get("ms") || 10);
+  const box = document.querySelector("[contenteditable]");
+  const stop = document.querySelector("[data-testid=stop-button]");
+  let timer;
+  window.sent = [];
+  window.stopped = 0;
+  box.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter — перенос строки
+    event.preventDefault();
+    const text = box.innerText.trim();
+    box.replaceChildren();
+    window.sent.push(text);
+    const turn = document.createElement("div");
+    turn.dataset.conversationRole = "assistant";
+    turn.innerHTML = "<div data-markdown-text-style></div>";
+    document.querySelector("main").append(turn);
+    const reply = `Эхо: ${text}`;
+    let i = 0;
+    stop.hidden = false;
+    timer = setInterval(() => {
+      turn.firstChild.textContent = reply.slice(0, ++i);
+      if (i >= reply.length) {
+        clearInterval(timer);
+        stop.hidden = true;
+      }
+    }, ms);
+  });
+  stop.addEventListener("click", () => {
+    clearInterval(timer);
+    stop.hidden = true;
+    window.stopped++;
+  });
+</script>

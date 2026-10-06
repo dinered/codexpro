@@ -77,10 +77,8 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
     try {
       await mkdir(join(session.cwd, session.box), { recursive: true });
       await rm(join(session.cwd, reply), { force: true });
-      await writeFile(
-        join(session.cwd, task),
-        `# Задача из Paseo\n\n${text}\n\n---\n\nИтоговый ответ для Paseo запиши одним вызовом write в \`${reply}\`.\n`,
-      );
+      // ровно текст сообщения: его отправляет в ChatGPT мост tools/chatgpt-bridge; куда писать ответ — в подсказке ниже
+      await writeFile(join(session.cwd, task), text);
     } catch (error) {
       return finishTurn(sessionId, "failed", `Не удалось записать задачу: ${String(error)}`);
     }

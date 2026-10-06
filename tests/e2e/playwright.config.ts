@@ -6,5 +6,8 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: { baseURL: "http://127.0.0.1:6790", headless: true, ...devices["Desktop Chrome"] },
-  projects: [{ name: "paseo", testMatch: "paseo.spec.ts" }],
+  projects: [
+    { name: "paseo", testMatch: "paseo.spec.ts" }, // нужен контейнер paseo-sandbox
+    { name: "bridge", testMatch: "bridge.spec.ts" }, // только имитация ChatGPT
+  ],
 });

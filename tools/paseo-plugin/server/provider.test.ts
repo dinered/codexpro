@@ -24,7 +24,7 @@ async function startTurn(text: string) {
     prompt: { clientMessageId: "m1", delivery: "auto", input: { type: "message", content: [{ type: "text", text }] } },
   });
   const box = join(cwd, ".ai-bridge", "paseo", "s1");
-  await vi.waitFor(async () => expect(await readFile(join(box, "task.md"), "utf8")).toContain(text));
+  await vi.waitFor(async () => expect(await readFile(join(box, "task.md"), "utf8")).toBe(text));
   return { connection, events, box };
 }
 
