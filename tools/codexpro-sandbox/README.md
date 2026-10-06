@@ -87,8 +87,13 @@ await browser.close();   // для CDP только отключается: Chro
 ## Подключение в ChatGPT
 
 1. Settings → Security and login → Developer mode — включить.
-2. Settings → Plugins → «+» → имя `CodexPro`, Server URL — вставить из буфера,
-   Authentication: None (авторизация — токен в URL).
+2. Settings → Plugins → «Добавить» → «Создать пользовательский сервер MCP» →
+   имя `CodexPro Sandbox`, Server URL — вставить из буфера, Authentication:
+   None (авторизация — токен в URL).
+
+Имя `CodexPro Sandbox`, а не `CodexPro`: в аккаунте уже есть боевой `CodexPro`
+(ct116). Подсказка Paseo называет именно `CodexPro Sandbox`; в тестовом чате
+включать только его — иначе ChatGPT может писать файлы на ct116.
 
 ## Проверка без публичного туннеля
 

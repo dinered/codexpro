@@ -95,7 +95,7 @@ function createConnection(capabilities: readonly string[], pollMs: number): Prov
         text:
           `Задача ждёт ChatGPT: \`${task}\`. Вставьте в ChatGPT с плагином CodexPro:\n\n` +
           "```text\n" +
-          `Use CodexPro. Прочитай ${task} и выполни задачу в этом репозитории. ` +
+          `Use CodexPro Sandbox. Прочитай ${task} и выполни задачу в этом репозитории. ` +
           `Итоговый ответ запиши одним вызовом write в ${reply}.\n` +
           "```",
       },
