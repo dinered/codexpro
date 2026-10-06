@@ -1,8 +1,9 @@
 <!doctype html>
 <meta charset="utf-8" />
 <title>fake ChatGPT</title>
-<!-- Имитация разметки ChatGPT для тестов моста: те же селекторы, что SEL в tools/chatgpt-bridge/bridge.ts.
-     Отвечает «Эхо: <сообщение>» по букве раз в ?ms= миллисекунд; пока идёт ответ, видна кнопка «Стоп». -->
+<!-- Имитация разметки ChatGPT (2026-10-06) для тестов моста: те же селекторы, что SEL в tools/chatgpt-bridge/bridge.ts.
+     Отправка — пара [data-turn-key] с сообщением; ответ «Эхо: <сообщение>» идёт по букве раз в ?ms= миллисекунд,
+     пока он идёт, вместо «Отправить» видна кнопка «Остановить». -->
 <style>
   [data-markdown-text-style] { white-space: pre-wrap; }
 </style>
@@ -11,15 +12,21 @@
   <div data-composer-input>
     <div class="ProseMirror" role="textbox" contenteditable="true" aria-label="Спросить ChatGPT"></div>
   </div>
-  <button type="button" data-testid="stop-button" hidden>Стоп</button>
+  <button type="submit" aria-label="Отправить">↑</button>
+  <button type="button" aria-label="Остановить" hidden>■</button>
 </form>
 <script>
   const ms = Number(new URLSearchParams(location.search).get("ms") || 10);
   const box = document.querySelector("[contenteditable]");
-  const stop = document.querySelector("[data-testid=stop-button]");
+  const send = document.querySelector("[aria-label=Отправить]");
+  const stop = document.querySelector("[aria-label=Остановить]");
   let timer;
   window.sent = [];
   window.stopped = 0;
+  const streaming = (on) => {
+    send.hidden = on;
+    stop.hidden = !on;
+  };
   box.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter — перенос строки
     event.preventDefault();
@@ -27,23 +34,29 @@
     box.replaceChildren();
     window.sent.push(text);
     const turn = document.createElement("div");
-    turn.dataset.conversationRole = "assistant";
-    turn.innerHTML = "<div data-markdown-text-style></div>";
+    turn.dataset.turnKey = `turn-${window.sent.length}`;
+    turn.innerHTML = "<div data-user-message-bubble></div>";
+    turn.firstChild.textContent = text;
     document.querySelector("main").append(turn);
     const reply = `Эхо: ${text}`;
     let i = 0;
-    stop.hidden = false;
+    let answer;
+    streaming(true);
     timer = setInterval(() => {
-      turn.firstChild.textContent = reply.slice(0, ++i);
+      if (!answer) {
+        turn.insertAdjacentHTML("beforeend", '<h4 data-conversation-role="assistant">ChatGPT сказал:</h4><div data-markdown-text-style="assistant-message"></div>');
+        answer = turn.lastChild;
+      }
+      answer.textContent = reply.slice(0, ++i);
       if (i >= reply.length) {
         clearInterval(timer);
-        stop.hidden = true;
+        streaming(false);
       }
     }, ms);
   });
   stop.addEventListener("click", () => {
     clearInterval(timer);
-    stop.hidden = true;
+    streaming(false);
     window.stopped++;
   });
 </script>

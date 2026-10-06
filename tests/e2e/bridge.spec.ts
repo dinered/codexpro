@@ -38,7 +38,7 @@ test("«Стоп» в Paseo (task.md удалён) останавливает о
   const { root, boxes } = await sessions("долгая задача");
 
   const run = runBridge({ page, root, limit: 1, pollMs: 50, ignoreExisting: false, log: quiet });
-  await expect(page.locator(SEL.assistant)).toHaveCount(1);
+  await expect(page.locator(SEL.answer)).toHaveCount(1); // ответ пошёл
   await rm(join(boxes[0], "task.md"));
   await run;
 

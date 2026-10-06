@@ -5,12 +5,13 @@ import type { Page } from "playwright-core";
 import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// Разметка ChatGPT на 2026-10-06. Поменяется — править здесь и в tests/e2e/fake-chatgpt.html.
+// Разметка ChatGPT на 2026-10-06, интерфейс на русском («Стоп» ищется по подписи).
+// Поменяется — править здесь и в tests/e2e/fake-chatgpt.html.
 export const SEL = {
   composer: '[data-composer-input] [contenteditable="true"]',
-  assistant: '[data-conversation-role="assistant"]',
-  answer: "[data-markdown-text-style]",
-  stop: 'button[data-testid="stop-button"]',
+  turn: "[data-turn-key]", // пара «сообщение — ответ»
+  answer: '[data-markdown-text-style="assistant-message"]',
+  stop: 'button[aria-label="Остановить"]',
 };
 
 export interface BridgeOptions {
@@ -19,7 +20,7 @@ export interface BridgeOptions {
   limit?: number; // сообщений за запуск
   ignoreExisting?: boolean; // задачи, лежавшие до запуска, — остатки прошлых прогонов, не отправлять
   pollMs?: number;
-  startTimeoutMs?: number; // ChatGPT так и не начал отвечать: лимит, капча или вход слетел
+  startTimeoutMs?: number; // ChatGPT так и не принял сообщение: лимит, капча или вход слетел
   answerTimeoutMs?: number;
   log?: (line: string) => void;
 }
@@ -96,7 +97,9 @@ async function ask(
 ): Promise<string | null> {
   const composer = page.locator(SEL.composer);
   if ((await composer.innerText()).trim()) throw new Error("в поле ввода ChatGPT уже есть текст — мост его не трогает");
-  const turns = page.locator(SEL.assistant);
+  // ponytail: новый ход — по числу пар в DOM; начнёт ChatGPT выгружать старые пары длинного чата —
+  // сравнивать data-turn-key последней пары (пока что мост тогда просто встанет по startTimeoutMs)
+  const turns = page.locator(SEL.turn);
   const stop = page.locator(SEL.stop);
   const before = await turns.count();
 
@@ -119,7 +122,7 @@ async function ask(
     }
     const elapsed = Date.now() - started;
     if ((await turns.count()) <= before) {
-      if (elapsed > startTimeoutMs) throw new Error(`ChatGPT не начал отвечать за ${startTimeoutMs / 1000} с: лимит, капча или вход слетел?`);
+      if (elapsed > startTimeoutMs) throw new Error(`ChatGPT не принял сообщение за ${startTimeoutMs / 1000} с: лимит, капча или вход слетел?`);
       continue;
     }
     if (elapsed > answerTimeoutMs) throw new Error(`ChatGPT не закончил ответ за ${answerTimeoutMs / 1000} с`);
