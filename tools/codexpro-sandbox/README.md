@@ -43,6 +43,47 @@ sleep 15; docker logs codexpro-sandbox 2>&1 | grep -o 'https://[^ ]*codexpro_tok
 
 Пусто — туннель ещё не поднялся, повторить через несколько секунд.
 
+## Chrome для ChatGPT
+
+Обычный Chrome с отдельным профилем `~/work/ai/codexpro/2/sandbox-chrome/profile`
+(вне git): оператор сам входит в ChatGPT, Playwright к этому окну только
+подключается по CDP (протокол отладки Chrome). Открывать профиль из Playwright
+(`launchPersistentContext`, `npx playwright open`) нельзя: Chrome под
+автоматизацией выбивает вход в ChatGPT.
+
+Перед запуском (`AGENTS.md`: только выход `FOREIGN_STRICT`):
+
+```sh
+curl -s --unix-socket /tmp/verge/verge-mihomo.sock http://localhost/proxies/FOREIGN \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["now"])'   # FOREIGN_STRICT, иначе не запускать
+pgrep -f sandbox-chrome/profile    # пусто: второй Chrome на том же профиле не стартует
+```
+
+Запуск (порт `17891` — вход `foreign-shell` mihomo, группа `FOREIGN`):
+
+```sh
+nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$HOME/work/ai/codexpro/2/sandbox-chrome/profile" \
+  --proxy-server=socks5://127.0.0.1:17891 --remote-debugging-port=9222 \
+  --no-first-run --no-default-browser-check https://chatgpt.com >/dev/null 2>&1 &
+curl -s http://127.0.0.1:9222/json/version    # ответил — Chrome готов
+```
+
+CDP слушает только `127.0.0.1`. Флаг `--remote-allow-origins` не нужен:
+Playwright подключается без него, а `*` снимает защиту от подключения со
+страниц сайтов.
+
+Подключение из Playwright:
+
+```js
+const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+const page = browser.contexts()[0].pages().find((p) => p.url().startsWith("https://chatgpt.com"));
+// ...
+await browser.close();   // для CDP только отключается: Chrome и вход остаются (Playwright 1.63)
+```
+
+Остановить — Cmd+Q в этом окне Chrome. Процесс не убивать посреди работы.
+
 ## Подключение в ChatGPT
 
 1. Settings → Security and login → Developer mode — включить.
