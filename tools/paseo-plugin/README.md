@@ -74,7 +74,8 @@
 
 Кто отвечает:
 
-- мост — `tools/chatgpt-bridge/README.md`;
+- мост — `tools/chatgpt-bridge/README.md`; запускать до первого сообщения
+  агенту: при непустой очереди мост не стартует;
 - ChatGPT с CodexPro по подсказке в чате Paseo — только в браузере или профиле
   без CDP, не в Chrome моста (`tools/codexpro-sandbox/README.md`);
 - вручную — ID взять из имени файла задачи:

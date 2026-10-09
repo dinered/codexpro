@@ -5,30 +5,44 @@
 // открытым CDP — например, к другому окну оператора с его собственной перепиской в ChatGPT.
 // commands — командные строки процессов, слушающих порт (lsof → ps); null — можно подключаться.
 export const CHROME_PROXY = "--proxy-server=socks5://127.0.0.1:17891";
+// Флаги, с которыми Chrome ходит мимо --proxy-server, то есть мимо FOREIGN_STRICT.
+const PROXY_BYPASS = ["--no-proxy-server", "--proxy-pac-url", "--proxy-auto-detect", "--proxy-bypass-list"];
 export function chromeVerdict(commands: string[], profile: string): string | null {
   if (!commands.length) return "нет Chrome с отладкой на 127.0.0.1:9222 (tools/codexpro-sandbox/README.md, «Chrome для ChatGPT»)";
   const wanted = [`--user-data-dir=${profile}`, CHROME_PROXY];
-  if (commands.every((command) => wanted.every((flag) => command.includes(flag)))) return null;
-  return `на 127.0.0.1:9222 не тот Chrome: нужны ${wanted.join(" и ")} — мост не подключаю`;
+  // Флаги — целыми словами (Chrome на macOS принимает и «-флаг»): подстрока пропустила бы чужой профиль «profile-old»
+  // и прокси с откатом напрямую «…:17891,direct://». Каждый нужный флаг — ровно один раз: из двух Chrome берёт последний.
+  const fits = (command: string) => {
+    const flags = command.split(/\s+/).filter((word) => word.startsWith("-")).map((word) => word.replace(/^-+/, "--"));
+    const named = (name: string) => flags.filter((flag) => flag === name || flag.startsWith(`${name}=`));
+    return wanted.every((flag) => named(flag.split("=")[0]).join(" ") === flag) && PROXY_BYPASS.every((name) => !named(name).length);
+  };
+  if (commands.every(fits)) return null;
+  return `на 127.0.0.1:9222 не тот Chrome: нужны ${wanted.join(" и ")}, по одному разу и без флагов в обход прокси — мост не подключаю`;
 }
 
-// #внимание-учебно-аналитический-предохранитель — codexpro-sandbox не запущен: контейнеры OrbStack достают до CDP
+// #внимание-учебно-аналитический-предохранитель — codexpro-sandbox остановлен: контейнеры OrbStack достают до CDP
 // Мака (host.docker.internal → 127.0.0.1:9222), а в codexpro-sandbox ChatGPT выполняет команды. При сбое не пропускает:
-// docker не ответил — отказ. Остальные запущенные контейнеры тоже видят CDP: их мост не запрещает, а называет в журнале
+// docker не ответил — отказ. Остальные живые контейнеры тоже видят CDP: их мост не запрещает, а называет в журнале
 // (чек-лист живого прогона — остановить или принять риск явно).
 // Вход — ответ `docker --context orbstack ps -a --format '{{.Names}}\t{{.State}}'`.
+// Остановлен — только created, exited, dead: на паузе (paused) и при перезапуске (restarting) процессы контейнера живы,
+// Docker и тогда считает его Running; после `docker unpause` туннель и коннектор снова работают.
+const STOPPED = ["created", "exited", "dead"];
 export function containersVerdict(error: Error | null, stdout: string, stderr: string): { refusal: string | null; running: string[] } {
   if (error) {
     const why = stderr.trim() || error.message;
     return { refusal: `не удалось проверить контейнеры OrbStack (docker --context orbstack): ${why} — мост не запускаю`, running: [] };
   }
-  const running = stdout
+  const alive = stdout
     .split("\n")
     .map((line) => line.trim().split("\t"))
-    .filter(([name, state]) => name && state === "running")
-    .map(([name]) => name);
-  if (running.includes("codexpro-sandbox")) {
-    return { refusal: "запущен codexpro-sandbox, а он видит CDP этого Chrome; остановите: docker stop codexpro-sandbox", running };
+    .filter(([name, state]) => name && !STOPPED.includes(state));
+  const running = alive.map(([name, state]) => (state === "running" ? name : `${name} (${state})`));
+  const sandbox = alive.find(([name]) => name === "codexpro-sandbox");
+  if (sandbox) {
+    const refusal = `codexpro-sandbox не остановлен (${sandbox[1]}), а он видит CDP этого Chrome; остановите: docker --context orbstack stop codexpro-sandbox`;
+    return { refusal, running };
   }
   return { refusal: null, running };
 }

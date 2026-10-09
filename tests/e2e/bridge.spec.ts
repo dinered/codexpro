@@ -188,7 +188,8 @@ test("задача без пульса плагина (остаток мёртв
   for (const path of [dead.claim, dead.reply, dead.error]) expect(existsSync(path), path).toBe(false);
 });
 
-test("захват упавшего моста (без пульса): задача не отправляется повторно — error-<id>.md", async ({ page }) => {
+// Ветка цикла (acceptQueued: при запуске из CLI такую задачу останавливает проверка очереди — тест ниже)
+test("захват упавшего моста (без пульса) в очереди работающего моста: задача не отправляется повторно — error-<id>.md", async ({ page }) => {
   await openChat(page);
   const root = await newRoot();
   const orphan = await task(root, "s1", "отправлена упавшим мостом");
@@ -314,7 +315,8 @@ for (const [why, query, options, message, stops] of [
     const a = await task(root, "s1", "первая");
     const b = await task(root, "s2", "следующая");
 
-    const error = await runBridge({ page, root, ...fast, ...options }).catch((e) => e);
+    // limit 2: сломанная остановка вернёт { sent: 2 } сразу, а не повиснет до таймаута теста
+    const error = await runBridge({ page, root, ...fast, limit: 2, ...options }).catch((e) => e);
     expect(error).toBeInstanceOf(FatalError);
     expect(error.message).toMatch(message);
     expect(await read(a.error)).toMatch(message);
@@ -331,7 +333,7 @@ test("ChatGPT не принял сообщение (лимит, капча) — 
   const b = await task(root, "s2", "следующая");
 
   const lines: string[] = [];
-  const error = await runBridge({ page, root, ...fast, startTimeoutMs: 1_000, log: (line) => lines.push(line) }).catch((e) => e);
+  const error = await runBridge({ page, root, ...fast, limit: 2, startTimeoutMs: 1_000, log: (line) => lines.push(line) }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("не принял");
   expect(await read(a.error)).toContain("не принял");
@@ -339,7 +341,7 @@ test("ChatGPT не принял сообщение (лимит, капча) — 
   expect(await enters(page)).toBe(1); // ждал, а не жал Enter снова: обходить лимит или капчу мост не пытается
   for (const path of [a.claim, b.claim, b.reply, b.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
   // #модельный-учебно-аналитический-контроль — итог прогона есть и при FatalError
-  expect(lines.at(-1)).toBe(`отправлено сообщений за запуск: 1 из ${DEFAULT_LIMIT}`);
+  expect(lines.at(-1)).toBe("отправлено сообщений за запуск: 1 из 2");
 });
 
 test("второй мост на том же корне не запускается, замок первого цел", async ({ page }) => {
@@ -396,7 +398,7 @@ test("вкладку увели в другой чат во время ввод�
   const root = await newRoot();
   const a = await task(root, "s1", "секретная задача");
 
-  const error = await runBridge({ page, root, ...fast }).catch((e) => e);
+  const error = await runBridge({ page, root, ...fast, limit: 1 }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("ушла из чата");
   expect(await sent(page)).toEqual([]);
@@ -404,16 +406,53 @@ test("вкладку увели в другой чат во время ввод�
   expect((await page.locator(SEL.composer).innerText()).trim()).toBe("");
 });
 
+// acceptQueued: undefined — проверяется значение по умолчанию, на котором работает main.ts
 test("очередь при запуске не пуста — мост не стартует и ничего не отправляет", async ({ page }) => {
   await openChat(page);
   const root = await newRoot();
   const old = await task(root, "s1", "забытый ход");
 
-  const error = await runBridge({ page, root, ...fast, acceptQueued: false }).catch((e) => e);
+  const error = await runBridge({ page, root, ...fast, acceptQueued: undefined, limit: 1 }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("в очереди уже есть задачи");
+  expect(error.message).not.toContain("могло уже уйти");
   expect(await sent(page)).toEqual([]);
   for (const path of [old.claim, old.reply, old.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
+});
+
+test("перезапуск после падения моста посреди хода: не стартует и предупреждает, что сообщение могло уйти", async ({ page }) => {
+  await openChat(page);
+  const root = await newRoot();
+  const orphan = await task(root, "s1", "отправлена упавшим мостом");
+  await writeFile(orphan.claim, "упавший мост");
+  await age(orphan.claim, LEASE_MS + 5_000);
+
+  const error = await runBridge({ page, root, ...fast, acceptQueued: undefined, limit: 1 }).catch((e) => e);
+  expect(error).toBeInstanceOf(FatalError);
+  expect(error.message).toContain("в очереди уже есть задачи");
+  expect(error.message).toContain("сообщение могло уже уйти в ChatGPT");
+  expect(await sent(page)).toEqual([]);
+  expect(await read(orphan.claim)).toBe("упавший мост");
+  for (const path of [orphan.reply, orphan.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
+});
+
+test("ход без пульса при запуске, оживший позже, в ChatGPT не уходит — error-<id>.md", async ({ page }) => {
+  await openChat(page, "?ms=1");
+  const root = await newRoot();
+  const old = await task(root, "s1", "забытый ход");
+  await age(old.task, LEASE_MS + 5_000); // плагин стоял (docker pause): проверку очереди ход проходит
+
+  const bridge = start(page, root, { acceptQueued: undefined });
+  await expect.poll(() => existsSync(join(root, BRIDGE_LOCK))).toBe(true);
+  await page.waitForTimeout(1_000); // проверка очереди позади: она идёт сразу после захвата замка
+  await utimes(old.task, new Date(), new Date()); // плагин ожил
+  const live = await task(root, "s2", "новый ход");
+  await handled(old);
+  await handled(live);
+  expect(await bridge.stop()).toEqual({ sent: 1 });
+  expect(await sent(page)).toEqual(["новый ход"]);
+  expect(await read(old.error)).toContain("ход ждал до запуска моста");
+  expect(existsSync(old.reply)).toBe(false);
 });
 
 test("значения договорённости: пауза 20 с, лимит по умолчанию 20, не больше 500", async ({ page }) => {
@@ -425,15 +464,18 @@ test("значения договорённости: пауза 20 с, лими�
   expect(await runBridge({ page, root, ...fast, limit: 501, signal: stopped }).catch((e) => e)).toBeInstanceOf(FatalError);
 });
 
-test("пауза по умолчанию действует и после запуска: первые секунды мост ничего не берёт", async ({ page }) => {
+test("пауза по умолчанию 20 с действует и после запуска: первые секунды мост ничего не берёт", async ({ page }) => {
   await openChat(page, "?ms=1");
   const root = await newRoot();
   const a = await task(root, "s1", "сразу после запуска");
-  const bridge = start(page, root, { pauseMs: undefined }); // pauseMs по умолчанию — PAUSE_MS
+  const lines: string[] = [];
+  const bridge = start(page, root, { pauseMs: undefined, limit: undefined, log: (line) => lines.push(line) }); // по умолчанию
   await page.waitForTimeout(2_000);
   expect(existsSync(a.claim)).toBe(false);
   expect(await bridge.stop()).toEqual({ sent: 0 });
   expect(await sent(page)).toEqual([]);
+  // #модельный-учебно-аналитический-контроль — журнал называет действующие значения, а не константы
+  expect(lines[0]).toContain("не больше 20 сообщений за запуск, пауза 20 с");
 });
 
 test("остановка оператором: первый сигнал — мягкая остановка, выйти сразу — только повторным Ctrl+C", () => {
@@ -451,13 +493,32 @@ test("проверка Chrome: только профиль песочницы с
   expect(chromeVerdict([ok.replace(CHROME_PROXY, "--proxy-server=socks5://127.0.0.1:1082")], profile)).toMatch(/не тот Chrome/);
   expect(chromeVerdict([ok.replace(profile, "/Users/u/chrome-main")], profile)).toMatch(/не тот Chrome/);
   expect(chromeVerdict([ok, "/usr/bin/other --remote-debugging-port=9222"], profile)).toMatch(/не тот Chrome/);
+  for (const bad of [
+    ok.replace(profile, `${profile}-old`), // чужой профиль с тем же началом пути
+    ok.replace(CHROME_PROXY, `${CHROME_PROXY},direct://`), // прокси недоступен — напрямую, мимо FOREIGN_STRICT
+    `${ok} --proxy-server=direct://`, // из двух флагов Chrome берёт последний
+    `${ok} --user-data-dir=/Users/u/other`,
+    `${ok} --no-proxy-server`,
+    `${ok} -no-proxy-server`, // и с одним дефисом
+    `${ok} --proxy-pac-url=http://127.0.0.1/proxy.pac`,
+    `${ok} --proxy-auto-detect`,
+    `${ok} --proxy-bypass-list=*`,
+  ]) {
+    expect(chromeVerdict([bad], profile), bad).toMatch(/не тот Chrome/);
+  }
 });
 
-test("проверка контейнеров: запущенный codexpro-sandbox или сбой docker — отказ; остальные называются", () => {
+test("проверка контейнеров: неостановленный codexpro-sandbox или сбой docker — отказ; остальные живые называются", () => {
   const exit1 = new Error("Command failed: exit 1");
   expect(containersVerdict(null, "paseo-sandbox\trunning\ncodexpro-sandbox\texited\n", "")).toEqual({ refusal: null, running: ["paseo-sandbox"] });
   expect(containersVerdict(null, "", "")).toEqual({ refusal: null, running: [] });
-  expect(containersVerdict(null, "codexpro-sandbox\trunning\nsearxng\trunning\n", "").refusal).toMatch(/запущен codexpro-sandbox/);
+  expect(containersVerdict(null, "a\tcreated\nb\tdead\nsearxng\tpaused\nc\trestarting\n", "")).toEqual({
+    refusal: null,
+    running: ["searxng (paused)", "c (restarting)"], // на паузе процессы живы: после unpause снова видят CDP
+  });
+  for (const state of ["running", "paused", "restarting", "removing"]) {
+    expect(containersVerdict(null, `codexpro-sandbox\t${state}\nsearxng\trunning\n`, "").refusal, state).toMatch(/codexpro-sandbox не остановлен/);
+  }
   for (const [error, stderr] of [
     [new Error("spawn docker ENOENT"), ""], // нет docker
     [exit1, "Cannot connect to the Docker daemon"], // OrbStack не запущен

@@ -108,6 +108,7 @@ export async function runBridge({
   const stop = page.locator(SEL.stop).visible().first();
   // #внимание-учебно-аналитический-предохранитель — отправленное второй раз не уходит, что бы ни стало с файлами
   const sentIds = new Set<string>();
+  const queuedAtStart = new Set<string>(); // ходы, ждавшие до запуска моста: в ChatGPT не уходят никогда
   let sent = 0;
   let sentAt = Date.now(); // последняя отправка — для паузы; запуск считается отправкой: перезапуск паузу не обходит
 
@@ -131,9 +132,9 @@ export async function runBridge({
     return true;
   }
 
-  // Живые задачи без ответа, старые первыми.
+  // Задачи без ответа, старые первыми: живые (плагин их пульсирует) или, при live = false, все.
   // #внимание-учебно-аналитический-предохранитель — ссылки (на папки и файлы) пропускаются: их мог подложить ChatGPT.
-  async function pending() {
+  async function pending(live = true) {
     const tasks: Task[] = [];
     for (const entry of await readdir(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -144,7 +145,7 @@ export async function runBridge({
         if (parsed?.kind !== "task" || sentIds.has(parsed.id)) continue;
         if (names.includes(fileName("reply", parsed.id)) || names.includes(fileName("error", parsed.id))) continue;
         const info = await lstat(join(dir, name)).catch(() => null);
-        if (info && (await isFresh(join(dir, name), leaseMs))) {
+        if (info?.isFile() && (!live || (await isFresh(join(dir, name), leaseMs)))) {
           tasks.push({ session: entry.name, id: parsed.id, dir, born: info.birthtimeMs || info.mtimeMs });
         }
       }
@@ -215,8 +216,9 @@ export async function runBridge({
     sentAt = Date.now();
     sentIds.add(task.id);
     log(`${task.session}/${task.id}: отправлено в ChatGPT (${sent}/${limit})`);
-    // #внимание-учебно-аналитический-предохранитель — после Enter повторов нет: повтор отправил бы сообщение дважды. И любой исход без
-    // нормального ответа останавливает мост: так ChatGPT показывает и лимит, и ошибку — слать дальше нельзя.
+    // #внимание-учебно-аналитический-предохранитель — после Enter повторов нет: повтор отправил бы сообщение дважды. И мост встаёт, если
+    // ChatGPT не принял сообщение, не начал или не закончил ответ либо закончил ход без текста: так он показывает и лимит, и
+    // ошибку — слать дальше нельзя. Ошибку после части текста мост не отличает от конца ответа (README, «Известные ограничения»).
     const enteredAt = sentAt;
     let key = ""; // наша пара
     let acceptedAt = 0;
@@ -248,7 +250,7 @@ export async function runBridge({
       const turn = await readTurnOf(key);
       const busy = await stop.isVisible();
       if (!startedAt && (busy || turn.markdown)) startedAt = now;
-      // #внимание-учебно-аналитический-предохранитель — сроки: не начал отвечать или не закончил — «Остановить» и ошибка задачи
+      // #внимание-учебно-аналитический-предохранитель — сроки: не начал отвечать или не закончил — «Остановить», ошибка хода и стоп моста
       if (!startedAt && now - acceptedAt > startTimeoutMs) {
         await stopAndWaitIdle();
         throw new FatalError(`ChatGPT не начал отвечать за ${startTimeoutMs / 1000} с — лимит или ошибка? Проверьте чат`);
@@ -289,12 +291,21 @@ export async function runBridge({
 
   try {
     if (!CHAT_URL.test(url)) throw new FatalError("вкладка ChatGPT должна быть открыта в существующем чате (https://chatgpt.com/c/…)");
-    // #внимание-учебно-аналитический-предохранитель — очередь при запуске пуста: в ChatGPT уходит только то, что оператор отправил при работающем
-    // мосте, а не забытый ход из прошлого (проверка Paseo через CLI, упавший тест)
-    const queued = acceptQueued ? [] : await pending();
-    if (queued.length) {
-      const names = queued.map((task) => `${task.session}/${task.id}`).join(", ");
-      throw new FatalError(`в очереди уже есть задачи (${names}): отмените их в Paseo («Стоп») и запустите мост заново`);
+    // #модельный-учебно-аналитический-контроль — действующие лимит и пауза в журнале: их сверяет чек-лист живого прогона
+    log(`мост: ${root} → чат ${new URL(url).pathname}, не больше ${limit} сообщений за запуск, пауза ${pauseMs / 1000} с`);
+    if (!acceptQueued) {
+      // #внимание-учебно-аналитический-предохранитель — очередь при запуске пуста: в ChatGPT уходит только то, что оператор отправил при
+      // работающем мосте, а не забытый ход из прошлого (проверка Paseo через CLI, упавший тест или мост)
+      const live = await pending();
+      if (live.length) {
+        const names = live.map((task) => `${task.session}/${task.id}`).join(", ");
+        const claimed = await Promise.all(live.map((task) => lstat(fileOf(task, "claim")).then(() => true, () => false)));
+        // захват остался от упавшего моста: сообщение могло уже уйти, и отправить его из Paseo снова — второе сообщение
+        const warning = claimed.includes(true) ? "; мост упал во время хода — сообщение могло уже уйти в ChatGPT: проверьте чат" : "";
+        throw new FatalError(`в очереди уже есть задачи (${names}): отмените их в Paseo («Стоп») и запустите мост заново${warning}`);
+      }
+      // ход без пульса (плагин стоял) тоже из прошлого: оживёт позже — в ChatGPT не уйдёт
+      for (const task of await pending(false)) queuedAtStart.add(task.id);
     }
     while (sent < limit && !signal?.aborted) {
       await beat();
@@ -303,11 +314,18 @@ export async function runBridge({
       for (const task of tasks) {
         const claim = await acquire(fileOf(task, "claim"), token, leaseMs);
         if (!claim) continue; // её ведёт другой исполнитель
-        if (claim === "taken-over") {
-          // #внимание-учебно-аналитический-предохранитель — прошлый мост упал с этой задачей и мог успеть её отправить: повтор — второе сообщение в ChatGPT
-          await writeAtomic(fileOf(task, "error"), "мост упал во время задачи, сообщение могло уйти в ChatGPT — проверьте чат");
+        // #внимание-учебно-аналитический-предохранитель — не отправляются задача упавшего моста (он мог успеть её отправить: повтор —
+        // второе сообщение в ChatGPT) и ход, ждавший до запуска моста
+        const refusal =
+          claim === "taken-over"
+            ? "мост упал во время задачи, сообщение могло уйти в ChatGPT — проверьте чат"
+            : queuedAtStart.has(task.id)
+              ? "ход ждал до запуска моста, мост его не отправляет — отправьте сообщение заново"
+              : null;
+        if (refusal) {
+          await writeAtomic(fileOf(task, "error"), refusal);
           await release(fileOf(task, "claim"), token);
-          log(`${task.session}/${task.id}: брошена упавшим мостом, не отправляется`);
+          log(`${task.session}/${task.id}: ${refusal}`);
           continue;
         }
         await handle(task);

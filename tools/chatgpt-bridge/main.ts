@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { text } from "node:stream/consumers";
 import { parseArgs } from "node:util";
-import { DEFAULT_LIMIT, FatalError, MAX_LIMIT, PAUSE_MS, runBridge } from "./bridge.ts";
+import { DEFAULT_LIMIT, FatalError, MAX_LIMIT, runBridge } from "./bridge.ts";
 import { chromeVerdict, containersVerdict, journalLine, stopSignalAction } from "./cli.ts";
 
 const MIHOMO = "/tmp/verge/verge-mihomo.sock";
@@ -66,7 +66,10 @@ process.stderr.on("error", () => {});
 for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(name, () => {
     const action = stopSignalAction(name, abort.signal.aborted);
-    if (action === "exit") process.exit(130);
+    if (action === "exit") {
+      log(`${name} повторно: выход сразу — идущий ответ ChatGPT не остановлен, захват задачи и замок моста не сняты`);
+      process.exit(130);
+    }
     if (action === "ignore") return;
     abort.abort();
     log(`${name}: мост останавливается, идущий ответ ChatGPT будет остановлен; Ctrl+C ещё раз — выйти сразу`);
@@ -92,7 +95,8 @@ for (const pid of listeners.stdout.split("\n").filter(Boolean)) {
 const chrome = chromeVerdict(commands, PROFILE);
 if (chrome) fail(chrome);
 
-await mkdir(root, { recursive: true }); // мост запускают до первой задачи: плагин папку мог ещё не создать
+// мост запускают до первой задачи: плагин папку мог ещё не создать
+await mkdir(root, { recursive: true }).catch((error) => fail(`не удалось создать каталог задач ${root}: ${error.message}`));
 // #внимание-учебно-аналитический-предохранитель — только подключение к уже открытому Chrome оператора: браузер мост
 // не запускает (свой запуск ещё и выбивает вход в ChatGPT).
 const browser = await chromium
@@ -102,7 +106,7 @@ try {
   const pages = browser.contexts().flatMap((c) => c.pages()).filter((p) => p.url().startsWith("https://chatgpt.com/"));
   // #внимание-учебно-аналитический-предохранитель — ровно одна вкладка chatgpt.com: мост не выбирает чат сам
   if (pages.length !== 1) throw new FatalError(`нужна ровно одна вкладка chatgpt.com, открыто: ${pages.length}`);
-  log(`мост: ${root} → чат ${new URL(pages[0].url()).pathname}, не больше ${limit} сообщений, пауза ${PAUSE_MS / 1000} с; Ctrl+C — стоп`);
+  console.log("Ctrl+C — остановить мост");
   await runBridge({ page: pages[0], root, limit, log, signal: abort.signal });
   log("мост остановлен");
 } catch (error) {
