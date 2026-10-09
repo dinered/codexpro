@@ -4,8 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { acquire, BRIDGE_LOCK, fileName, isFresh, newTaskId, parseName, tasksRoot, writeAtomic, type Kind } from "./protocol";
+import { acquire, BRIDGE_LOCK, fileName, isFresh, newTaskId, parseName, pulse, tasksRoot, writeAtomic, type Kind } from "./protocol";
 import { createCodexproProvider } from "./provider";
+
+// pulse — настоящий, но тест может подменить один вызов (гонка «файл удалён между проверкой и пульсом»)
+vi.mock("./protocol", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./protocol")>();
+  return { ...actual, pulse: vi.fn(actual.pulse) };
+});
 
 // Переносы, отступ, обратные кавычки и перевод строки в конце: в файл задачи — байт в байт.
 const TEXT = "Добавь README\n  с примером `npm test`\n";
@@ -168,6 +174,18 @@ describe("провайдер codexpro, протокол v2", () => {
     const { events, file } = await startTurn();
 
     await rm(file("task"));
+
+    await vi.waitFor(() => expect(turnStates(events)).toEqual(["started", "failed"]));
+    expect(turnError(events)).toBe("файл задачи удалён");
+  });
+
+  it("файл задачи удалён между проверкой и пульсом — тоже «файл задачи удалён», а не ошибка чтения ответа", async () => {
+    const { events } = await startTurn();
+    const { pulse: real } = await vi.importActual<typeof import("./protocol")>("./protocol");
+    vi.mocked(pulse).mockImplementationOnce(async (path) => {
+      await rm(path); // ровно в окне после lstat плагина
+      return real(path);
+    });
 
     await vi.waitFor(() => expect(turnStates(events)).toEqual(["started", "failed"]));
     expect(turnError(events)).toBe("файл задачи удалён");

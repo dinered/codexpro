@@ -12,7 +12,7 @@ const BRIDGE = tasksRoot(join(ROOT, "sandbox"));
 const FAKE = fileURLToPath(new URL("fake-chatgpt.html", import.meta.url));
 const CHAT = "https://chatgpt.com/c/fake-test";
 
-// Пока работает настоящий мост, сообщения e2e ушли бы в живой ChatGPT.
+// #внимание-учебно-аналитический-предохранитель — пока работает настоящий мост, сообщения e2e ушли бы в живой ChatGPT: тест не стартует.
 test.beforeAll(async () => {
   const lock = join(BRIDGE, BRIDGE_LOCK);
   if (await isFresh(lock)) {
@@ -83,12 +83,13 @@ test("агент ChatGPT (CodexPro): task-<id>.md -> reply-<id>.md -> ответ
 });
 
 test("мост: задача Paseo уходит в имитацию ChatGPT, ответ появляется в чате", async ({ page, context }) => {
-  // мост берёт любую живую задачу корня: чужой ход получил бы ответ имитации
+  // #внимание-учебно-аналитический-предохранитель — мост берёт любую живую задачу корня: чужой ход получил бы ответ имитации
   const live: string[] = [];
   for (const t of await tasks()) if (await isFresh(t.file)) live.push(t.file);
   expect(live, "в .ai-bridge/paseo ждут ответа другие ходы — дождитесь их или отмените").toEqual([]);
 
   const chat = await context.newPage();
+  // #внимание-учебно-аналитический-предохранитель — мост в тесте видит только имитацию ChatGPT, остальные запросы обрываются
   await chat.route("**/*", (route) => (route.request().url().startsWith(CHAT) ? route.fulfill({ path: FAKE }) : route.abort()));
   await chat.goto(CHAT);
   const abort = new AbortController();

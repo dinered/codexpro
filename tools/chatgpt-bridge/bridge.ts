@@ -2,7 +2,7 @@
 // Плагин codexpro-worker кладёт задачу в <root>/<сессия>/task-<id>.md и пульсирует её, пока ход идёт.
 // Мост захватывает задачу (claim-<id>), вводит текст в открытый чат ChatGPT, ждёт конца ответа и пишет
 // ответ в markdown в reply-<id>.md; не вышло — причину в error-<id>.md.
-// Учебный мост: каждое ограничение работы с ChatGPT помечено #внимание-учебно-аналитический-предохранитель (AGENTS.md).
+// Учебный мост: каждое ограничение работы с ChatGPT помечено меткой предохранителя (AGENTS.md); список — README моста.
 import type { Page } from "playwright-core";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -38,14 +38,15 @@ export const SEL = {
 // после первого сообщения, а мост привязан к адресу).
 export const CHAT_URL = /^https:\/\/chatgpt\.com\/c\/[\w-]+/;
 
-// #внимание-учебно-аналитический-предохранитель — лимит сообщений за запуск (Issue #2 п. 6: не больше 500) и пауза
-// между ними: не чаще одного сообщения в PAUSE_MS. Проверяются в ядре, не только в CLI.
+// #внимание-учебно-аналитический-предохранитель — лимит сообщений за запуск (Issue #2 п. 6: не больше 500) и пауза: не чаще одного
+// сообщения в PAUSE_MS, в том числе после запуска. Лимит ядро проверяет при любом вызове; паузу ядро выдерживает
+// само, параметр pauseMs меньше PAUSE_MS — только для тестов.
 export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 20;
 export const PAUSE_MS = 20_000;
 
 export class FatalError extends Error {} // остановить мост целиком
-export class TaskError extends Error {} // задача не выполнена (error-<id>.md), мост работает дальше
+export class TaskError extends Error {} // задача не выполнена (error-<id>.md), мост работает дальше; только до Enter
 
 export interface BridgeOptions {
   page: Page;
@@ -59,6 +60,7 @@ export interface BridgeOptions {
   retries?: number; // повторы ввода текста — только до Enter
   log?: (line: string) => void;
   signal?: AbortSignal; // остановка оператором (Ctrl+C)
+  acceptQueued?: boolean; // взять задачи, ждавшие до запуска моста, — только для тестов
 }
 
 interface Task {
@@ -88,6 +90,7 @@ export async function runBridge({
   retries = 2,
   log = console.log,
   signal,
+  acceptQueued = false,
 }: BridgeOptions): Promise<{ sent: number }> {
   // #внимание-учебно-аналитический-предохранитель — лимит в пределах 1..MAX_LIMIT при любом вызове ядра
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
@@ -106,7 +109,7 @@ export async function runBridge({
   // #внимание-учебно-аналитический-предохранитель — отправленное второй раз не уходит, что бы ни стало с файлами
   const sentIds = new Set<string>();
   let sent = 0;
-  let sentAt = -Infinity; // последняя отправка — для паузы
+  let sentAt = Date.now(); // последняя отправка — для паузы; запуск считается отправкой: перезапуск паузу не обходит
 
   // #внимание-учебно-аналитический-предохранитель — каждый опрос и прямо перед Enter: замок наш и жив, вкладка в том же чате.
   async function beat() {
@@ -178,6 +181,7 @@ export async function runBridge({
   // Вводит текст в чат и ждёт конца ответа. Ответ в markdown; null — задача больше не нужна.
   // ponytail: опрос раз в pollMs, без MutationObserver — конец ответа виден с задержкой до 2×pollMs
   async function ask(task: Task, text: string): Promise<string | null> {
+    // #внимание-учебно-аналитический-предохранитель — нет поля ввода (вход слетел, другая страница): стоп
     if (!(await composer.isVisible())) throw new FatalError("нет поля ввода ChatGPT — вход слетел?");
     // #внимание-учебно-аналитический-предохранитель — чат занят (идёт ответ или черновик в поле ввода): в чужой ход мост не вмешивается
     if ((await stop.isVisible()) || (await composer.innerText()).trim()) {
@@ -201,13 +205,18 @@ export async function runBridge({
       return null;
     }
 
-    await beat(); // прямо перед Enter: вкладка всё ещё в том чате и замок наш
+    // прямо перед Enter: вкладка всё ещё в том чате и замок наш; нет — введённый текст задачи не оставлять в поле
+    await beat().catch(async (error) => {
+      if (normalize(await composer.innerText().catch(() => "")) === normalize(text)) await clear();
+      throw error;
+    });
     await page.keyboard.press("Enter");
     sent++;
     sentAt = Date.now();
     sentIds.add(task.id);
     log(`${task.session}/${task.id}: отправлено в ChatGPT (${sent}/${limit})`);
-    // #внимание-учебно-аналитический-предохранитель — после Enter повторов нет: повтор отправил бы сообщение дважды
+    // #внимание-учебно-аналитический-предохранитель — после Enter повторов нет: повтор отправил бы сообщение дважды. И любой исход без
+    // нормального ответа останавливает мост: так ChatGPT показывает и лимит, и ошибку — слать дальше нельзя.
     const enteredAt = sentAt;
     let key = ""; // наша пара
     let acceptedAt = 0;
@@ -242,16 +251,17 @@ export async function runBridge({
       // #внимание-учебно-аналитический-предохранитель — сроки: не начал отвечать или не закончил — «Остановить» и ошибка задачи
       if (!startedAt && now - acceptedAt > startTimeoutMs) {
         await stopAndWaitIdle();
-        throw new TaskError(`ChatGPT не начал отвечать за ${startTimeoutMs / 1000} с`);
+        throw new FatalError(`ChatGPT не начал отвечать за ${startTimeoutMs / 1000} с — лимит или ошибка? Проверьте чат`);
       }
       // конец: «Остановить» нет, «Сгенерировать заново» есть, ничего не печатается и текст не менялся с прошлого опроса
       if (startedAt && !busy && turn.done && !turn.streaming && turn.markdown === last) {
-        if (!turn.markdown) throw new TaskError("в ответе ChatGPT нет текста"); // пустой reply плагин не примет — ход завис бы
+        // пустой reply плагин не примет — ход завис бы; а пустой «готовый» ответ — так ChatGPT показывает ошибку
+        if (!turn.markdown) throw new FatalError("в ответе ChatGPT нет текста — ошибка или лимит? Проверьте чат");
         return turn.markdown;
       }
       if (startedAt && now - startedAt > answerTimeoutMs) {
         await stopAndWaitIdle();
-        throw new TaskError(`ChatGPT не закончил ответ за ${answerTimeoutMs / 1000} с`);
+        throw new FatalError(`ChatGPT не закончил ответ за ${answerTimeoutMs / 1000} с — проверьте чат`);
       }
       last = turn.markdown;
     }
@@ -279,6 +289,13 @@ export async function runBridge({
 
   try {
     if (!CHAT_URL.test(url)) throw new FatalError("вкладка ChatGPT должна быть открыта в существующем чате (https://chatgpt.com/c/…)");
+    // #внимание-учебно-аналитический-предохранитель — очередь при запуске пуста: в ChatGPT уходит только то, что оператор отправил при работающем
+    // мосте, а не забытый ход из прошлого (проверка Paseo через CLI, упавший тест)
+    const queued = acceptQueued ? [] : await pending();
+    if (queued.length) {
+      const names = queued.map((task) => `${task.session}/${task.id}`).join(", ");
+      throw new FatalError(`в очереди уже есть задачи (${names}): отмените их в Paseo («Стоп») и запустите мост заново`);
+    }
     while (sent < limit && !signal?.aborted) {
       await beat();
       // #внимание-учебно-аналитический-предохранитель — пауза ждётся до захвата задачи: захват за время паузы не протухнет
@@ -302,7 +319,7 @@ export async function runBridge({
     return { sent };
   } finally {
     await release(lock, token);
-    // #модельный-учебно-аналитический-контроль — итог при любом исходе, в том числе при FatalError:
+    // #модельный-учебно-аналитический-контроль — итог при любом исходе после захвата замка, в том числе при FatalError:
     // по нему Claude сверяет прогон (tools/chatgpt-bridge/README.md, «Живой прогон»)
     log(`отправлено сообщений за запуск: ${sent} из ${limit}`);
   }
@@ -382,8 +399,10 @@ function readTurn(turns: Element[], sel: typeof SEL) {
         .filter((li) => li.tagName === "LI")
         .map((li) => {
           const marker = tag === "OL" ? `${n++}. ` : "- ";
+          // абзацы пункта (<p> внутри <li>) — через пустую строку, иначе они слились бы в один; плотный пункт — построчно
+          const sep = li.querySelector(":scope > p") ? "\n\n" : "\n";
           // продолжение пункта — с отступом на ширину маркера (CommonMark): «- » — 2, «9. » — 3, «10. » — 4
-          return marker + blocks(li).join("\n").replace(/\n(?!\n)/g, "\n" + " ".repeat(marker.length));
+          return marker + blocks(li).join(sep).replace(/\n(?!\n)/g, "\n" + " ".repeat(marker.length));
         })
         .join("\n");
     }

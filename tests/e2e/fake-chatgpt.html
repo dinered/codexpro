@@ -8,8 +8,12 @@
      пока ответ идёт, вместо «Отправить» — «Остановить», в конце — панель действий с «Сгенерировать ответ заново».
      ?think=мс — сначала «Думаю…»; ?pause=мс — пауза посреди ответа, «Остановить» на экране; ?hang — первый ответ
      не кончается; ?noanswer — первое сообщение принято, ответа нет; ?busy — «Остановить» на экране с самого начала;
-     ?keep=N — в DOM только N последних пар (длинный чат выгружает старые); ?reject — Enter не принимается (лимит, капча).
-     window.sent — отправленные тексты, window.sentAt — время их отправки (мс), window.stopped — нажатия «Остановить». -->
+     ?keep=N — в DOM только N последних пар (длинный чат выгружает старые); ?reject — Enter не принимается (лимит, капча);
+     ?error — сообщение принято, но вместо ответа ошибка и «Сгенерировать ответ заново» (так ChatGPT показывает сбой).
+     window.sent — отправленные тексты, window.sentAt — время их отправки (мс), window.enters — все нажатия Enter
+     в поле ввода (и непринятые), window.stopped — нажатия «Остановить».
+     #внимание-учебно-аналитический-предохранитель — имитация не ходит в сеть: тесты подставляют её через page.route,
+     а всё, что не адрес имитации, обрывают (route.abort). -->
 <style>
   [contenteditable] { min-height: 2em; border: 1px solid #999; }
   [data-user-message-bubble] { white-space: pre-wrap; }
@@ -44,6 +48,8 @@
     "<p></p><h3>Итог</h3>" +
     "<ul><li>первый пункт<ul><li>вложенный пункт</li></ul></li><li>второй с <code>кодом</code></li></ul>" +
     '<ol start="9"><li>девять<ul><li>под девятью</li></ul></li><li>десять<ul><li>под десятью</li></ul></li></ol>' +
+    "<ul><li><p><strong>Шаг</strong></p><p>Пояснение абзацем.</p></li>" +
+    '<li><p>Шаги:</p><ol start="3"><li>третий</li><li>четвёртый</li></ol></li></ul>' +
     '<pre><div><span>bash</span><button type="button">Копировать</button></div>' +
     '<div><code class="language-bash">echo привет\nls -la</code></div></pre>' +
     "<table><thead><tr><th>Ключ</th><th>Значение</th></tr></thead><tbody><tr><td>a</td><td>1</td></tr></tbody></table>" +
@@ -52,6 +58,7 @@
 
   window.sent = [];
   window.sentAt = [];
+  window.enters = 0;
   window.stopped = 0;
   let generating = q.has("busy");
   let generation = 0; // конец ответа и «Остановить» меняют номер — идущий ответ это видит и замирает
@@ -96,7 +103,18 @@
     main.append(turn);
     if (keep) while (main.children.length > keep) main.firstElementChild.remove();
     if (q.has("noanswer") && window.sent.length === 1) return render();
+    if (q.has("error")) return fail(turn);
     respond(turn, text);
+  }
+
+  // Сбой после приёма: «Остановить» мелькает, затем текст ошибки (не ответ) и панель с «Сгенерировать ответ заново».
+  async function fail(turn) {
+    generating = true;
+    current = turn;
+    render();
+    await sleep(200);
+    turn.insertAdjacentHTML("beforeend", '<div class="text-token-text-error">Что-то пошло не так. Повторите попытку.</div>');
+    finish();
   }
 
   async function respond(turn, text) {
@@ -139,6 +157,7 @@
   box.addEventListener("input", render);
   box.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter — перенос строки
+    window.enters++;
     event.preventDefault();
     send();
   });

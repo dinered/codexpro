@@ -4,16 +4,18 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } fro
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FatalError, MAX_LIMIT, runBridge, SEL, type BridgeOptions } from "../../tools/chatgpt-bridge/bridge.ts";
-import { sandboxVerdict } from "../../tools/chatgpt-bridge/preflight.ts";
+import { DEFAULT_LIMIT, FatalError, MAX_LIMIT, PAUSE_MS, runBridge, SEL, type BridgeOptions } from "../../tools/chatgpt-bridge/bridge.ts";
+import { CHROME_PROXY, chromeVerdict, containersVerdict, journalLine, stopSignalAction } from "../../tools/chatgpt-bridge/cli.ts";
 import { BRIDGE_LOCK, fileName, isFresh, LEASE_MS, newTaskId, writeAtomic, type Kind } from "../../tools/paseo-plugin/server/protocol.ts";
 
 // Мост против имитации ChatGPT: страница подставляется по адресу живого чата, в сеть ничего не уходит.
 const FAKE = fileURLToPath(new URL("fake-chatgpt.html", import.meta.url));
 const CHAT = "https://chatgpt.com/c/fake-test";
-const fast = { pollMs: 50, pauseMs: 0, startTimeoutMs: 5_000, answerTimeoutMs: 20_000, log: () => {} };
+// pauseMs 0 и acceptQueued — только для тестов: задачи кладутся до запуска моста, ждать 20 с незачем
+const fast = { pollMs: 50, pauseMs: 0, acceptQueued: true, startTimeoutMs: 5_000, answerTimeoutMs: 20_000, log: () => {} };
 
 async function openChat(page: Page, query = "") {
+  // #внимание-учебно-аналитический-предохранитель — в сеть ничего не уходит: адрес чата — имитация, остальное обрывается
   await page.route("**/*", (route) => (route.request().url().startsWith(CHAT) ? route.fulfill({ path: FAKE }) : route.abort()));
   await page.goto(CHAT + query);
 }
@@ -21,6 +23,7 @@ async function openChat(page: Page, query = "") {
 const sent = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).sent);
 const sentAt = (page: Page): Promise<number[]> => page.evaluate(() => (window as any).sentAt);
 const stopped = (page: Page): Promise<number> => page.evaluate(() => (window as any).stopped);
+const enters = (page: Page): Promise<number> => page.evaluate(() => (window as any).enters);
 const read = (path: string) => readFile(path, "utf8");
 const newRoot = () => mkdtemp(join(tmpdir(), "chatgpt-bridge-"));
 const age = (path: string, ms: number) => utimes(path, new Date(Date.now() - ms), new Date(Date.now() - ms));
@@ -63,6 +66,7 @@ const reply = (text: string) =>
     "### Итог",
     "- первый пункт\n  - вложенный пункт\n- второй с `кодом`",
     "9. девять\n   - под девятью\n10. десять\n    - под десятью", // продолжение пункта — на ширину маркера
+    "- **Шаг**\n\n  Пояснение абзацем.\n- Шаги:\n\n  3. третий\n  4. четвёртый", // абзацы пункта — через пустую строку
     "```bash\necho привет\nls -la\n```",
     "| Ключ | Значение |\n| --- | --- |\n| a | 1 |",
     "> цитата",
@@ -285,20 +289,40 @@ for (const [why, query, draft] of [
   });
 }
 
-test("ChatGPT принял сообщение и молчит — error-<id>.md, мост берёт следующую задачу", async ({ page }) => {
-  await openChat(page, "?noanswer&keep=1"); // keep=1: старые пары выгружаются, новую мост ищет по ключу, не по счёту
+test("длинный чат выгружает старые пары: новую пару мост находит по ключу, а не по счёту", async ({ page }) => {
+  await openChat(page, "?keep=1&ms=1");
   const root = await newRoot();
-  const a = await task(root, "s1", "без ответа");
-  const b = await task(root, "s2", "следующая");
+  const a = await task(root, "s1", "первая");
+  const b = await task(root, "s2", "вторая");
 
-  const bridge = start(page, root, { startTimeoutMs: 1_000 });
+  const bridge = start(page, root);
   await handled(a);
   await handled(b);
   expect(await bridge.stop()).toEqual({ sent: 2 });
-  expect(await read(a.error)).toMatch(/\S/);
-  expect(existsSync(a.reply)).toBe(false);
-  expect(await read(b.reply)).toContain("Эхо: следующая");
+  expect(await read(a.reply)).toContain("Эхо: первая");
+  expect(await read(b.reply)).toContain("Эхо: вторая");
 });
+
+for (const [why, query, options, message, stops] of [
+  ["принял и молчит", "?noanswer", { startTimeoutMs: 1_000 }, /не начал отвечать/, 0],
+  ["вместо ответа ошибка", "?error", {}, /нет текста/, 0],
+  ["ответ не кончается", "?hang&ms=1", { answerTimeoutMs: 2_000 }, /не закончил ответ/, 1], // и «Остановить» в ChatGPT
+] as const) {
+  test(`после Enter нет нормального ответа (${why}) — мост встаёт: FatalError, error-<id>.md, следующая не уходит`, async ({ page }) => {
+    await openChat(page, query);
+    const root = await newRoot();
+    const a = await task(root, "s1", "первая");
+    const b = await task(root, "s2", "следующая");
+
+    const error = await runBridge({ page, root, ...fast, ...options }).catch((e) => e);
+    expect(error).toBeInstanceOf(FatalError);
+    expect(error.message).toMatch(message);
+    expect(await read(a.error)).toMatch(message);
+    expect(await sent(page)).toEqual(["первая"]);
+    expect(await stopped(page)).toBe(stops);
+    for (const path of [a.reply, a.claim, b.claim, b.reply, b.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
+  });
+}
 
 test("ChatGPT не принял сообщение (лимит, капча) — мост встаёт: FatalError, error-<id>.md, дальше ничего не уходит", async ({ page }) => {
   await openChat(page, "?reject");
@@ -306,25 +330,16 @@ test("ChatGPT не принял сообщение (лимит, капча) — 
   const a = await task(root, "s1", "не примут");
   const b = await task(root, "s2", "следующая");
 
-  const error = await runBridge({ page, root, ...fast, startTimeoutMs: 1_000 }).catch((e) => e);
+  const lines: string[] = [];
+  const error = await runBridge({ page, root, ...fast, startTimeoutMs: 1_000, log: (line) => lines.push(line) }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("не принял");
   expect(await read(a.error)).toContain("не принял");
   expect(await sent(page)).toEqual([]);
+  expect(await enters(page)).toBe(1); // ждал, а не жал Enter снова: обходить лимит или капчу мост не пытается
   for (const path of [a.claim, b.claim, b.reply, b.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
-});
-
-test("ответ дописан, но «Остановить» не уходит — по answerTimeoutMs «Остановить» и error-<id>.md", async ({ page }) => {
-  await openChat(page, "?hang&ms=1");
-  const root = await newRoot();
-  const a = await task(root, "s1", "вечный ответ");
-
-  const bridge = start(page, root, { answerTimeoutMs: 2_000 });
-  await handled(a);
-  expect(await bridge.stop()).toEqual({ sent: 1 });
-  expect(await stopped(page)).toBe(1);
-  expect(existsSync(a.reply)).toBe(false);
-  expect(await read(a.error)).toMatch(/\S/);
+  // #модельный-учебно-аналитический-контроль — итог прогона есть и при FatalError
+  expect(lines.at(-1)).toBe(`отправлено сообщений за запуск: 1 из ${DEFAULT_LIMIT}`);
 });
 
 test("второй мост на том же корне не запускается, замок первого цел", async ({ page }) => {
@@ -372,18 +387,86 @@ test("мост привязан к открытому чату: не /c/<id> —
   expect(existsSync(join(root, BRIDGE_LOCK))).toBe(false);
 });
 
-test("проверка codexpro-sandbox пропускает только «остановлен» и «такого контейнера нет», при сбое — отказ", () => {
+test("вкладку увели в другой чат во время ввода: Enter не нажат, введённый текст стёрт", async ({ page }) => {
+  await openChat(page);
+  // слушатель на первый ввод: оператор переключил чат, пока мост печатал
+  await page.evaluate(() =>
+    document.querySelector("[contenteditable]")!.addEventListener("input", () => history.pushState(null, "", "/c/another-chat"), { once: true }),
+  );
+  const root = await newRoot();
+  const a = await task(root, "s1", "секретная задача");
+
+  const error = await runBridge({ page, root, ...fast }).catch((e) => e);
+  expect(error).toBeInstanceOf(FatalError);
+  expect(error.message).toContain("ушла из чата");
+  expect(await sent(page)).toEqual([]);
+  expect(await enters(page)).toBe(0);
+  expect((await page.locator(SEL.composer).innerText()).trim()).toBe("");
+});
+
+test("очередь при запуске не пуста — мост не стартует и ничего не отправляет", async ({ page }) => {
+  await openChat(page);
+  const root = await newRoot();
+  const old = await task(root, "s1", "забытый ход");
+
+  const error = await runBridge({ page, root, ...fast, acceptQueued: false }).catch((e) => e);
+  expect(error).toBeInstanceOf(FatalError);
+  expect(error.message).toContain("в очереди уже есть задачи");
+  expect(await sent(page)).toEqual([]);
+  for (const path of [old.claim, old.reply, old.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
+});
+
+test("значения договорённости: пауза 20 с, лимит по умолчанию 20, не больше 500", async ({ page }) => {
+  expect([PAUSE_MS, DEFAULT_LIMIT, MAX_LIMIT]).toEqual([20_000, 20, 500]);
+  await openChat(page);
+  const root = await newRoot();
+  const stopped = AbortSignal.abort(); // проверяется только приём лимита: мост сразу выходит
+  expect(await runBridge({ page, root, ...fast, limit: 500, signal: stopped })).toEqual({ sent: 0 });
+  expect(await runBridge({ page, root, ...fast, limit: 501, signal: stopped }).catch((e) => e)).toBeInstanceOf(FatalError);
+});
+
+test("пауза по умолчанию действует и после запуска: первые секунды мост ничего не берёт", async ({ page }) => {
+  await openChat(page, "?ms=1");
+  const root = await newRoot();
+  const a = await task(root, "s1", "сразу после запуска");
+  const bridge = start(page, root, { pauseMs: undefined }); // pauseMs по умолчанию — PAUSE_MS
+  await page.waitForTimeout(2_000);
+  expect(existsSync(a.claim)).toBe(false);
+  expect(await bridge.stop()).toEqual({ sent: 0 });
+  expect(await sent(page)).toEqual([]);
+});
+
+test("остановка оператором: первый сигнал — мягкая остановка, выйти сразу — только повторным Ctrl+C", () => {
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) expect(stopSignalAction(signal, false)).toBe("stop");
+  expect(stopSignalAction("SIGINT", true)).toBe("exit");
+  expect(stopSignalAction("SIGHUP", true)).toBe("ignore"); // закрытое окно: второй SIGHUP приходит сам
+  expect(stopSignalAction("SIGTERM", true)).toBe("ignore");
+});
+
+test("проверка Chrome: только профиль песочницы с выходом через 17891, иначе — отказ", () => {
+  const profile = "/Users/u/work/ai/codexpro/2/sandbox-chrome/profile";
+  const ok = `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=${profile} ${CHROME_PROXY} --remote-debugging-port=9222`;
+  expect(chromeVerdict([ok], profile)).toBeNull();
+  expect(chromeVerdict([], profile)).toMatch(/нет Chrome/);
+  expect(chromeVerdict([ok.replace(CHROME_PROXY, "--proxy-server=socks5://127.0.0.1:1082")], profile)).toMatch(/не тот Chrome/);
+  expect(chromeVerdict([ok.replace(profile, "/Users/u/chrome-main")], profile)).toMatch(/не тот Chrome/);
+  expect(chromeVerdict([ok, "/usr/bin/other --remote-debugging-port=9222"], profile)).toMatch(/не тот Chrome/);
+});
+
+test("проверка контейнеров: запущенный codexpro-sandbox или сбой docker — отказ; остальные называются", () => {
   const exit1 = new Error("Command failed: exit 1");
-  expect(sandboxVerdict(null, "false\n", "")).toBeNull();
-  expect(sandboxVerdict(exit1, "\n", "error: no such object: codexpro-sandbox\n")).toBeNull();
-  expect(sandboxVerdict(null, "true\n", "")).toMatch(/запущен codexpro-sandbox/);
-  for (const [error, stdout, stderr] of [
-    [new Error("spawn docker ENOENT"), "", ""], // нет docker
-    [exit1, "", "Cannot connect to the Docker daemon"], // OrbStack не запущен
-    [exit1, "", 'context "orbstack": context not found'],
-    [null, "", ""],
-    [null, "<no value>", ""],
+  expect(containersVerdict(null, "paseo-sandbox\trunning\ncodexpro-sandbox\texited\n", "")).toEqual({ refusal: null, running: ["paseo-sandbox"] });
+  expect(containersVerdict(null, "", "")).toEqual({ refusal: null, running: [] });
+  expect(containersVerdict(null, "codexpro-sandbox\trunning\nsearxng\trunning\n", "").refusal).toMatch(/запущен codexpro-sandbox/);
+  for (const [error, stderr] of [
+    [new Error("spawn docker ENOENT"), ""], // нет docker
+    [exit1, "Cannot connect to the Docker daemon"], // OrbStack не запущен
+    [exit1, 'context "orbstack": context not found'],
   ] as const) {
-    expect(sandboxVerdict(error, stdout, stderr), `${stderr || stdout || error?.message}`).toMatch(/не удалось проверить/);
+    expect(containersVerdict(error, "", stderr).refusal, stderr || error.message).toMatch(/не удалось проверить/);
   }
+});
+
+test("строка журнала: время UTC в ISO 8601 и событие", () => {
+  expect(journalLine(new Date(Date.UTC(2026, 9, 10, 1, 2, 3, 4)), "мост остановлен")).toBe("2026-10-10T01:02:03.004Z мост остановлен");
 });

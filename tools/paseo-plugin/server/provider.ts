@@ -133,7 +133,8 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
         // пульс, пока ответа нет: исполнитель берёт и держит только задачу со свежим пульсом
         if (!answer && Date.now() - pulsed >= pulseMs) {
           gone = !(await lstat(file("task")).catch(() => null))?.isFile();
-          if (!gone) await pulse(file("task"));
+          // файл могли удалить и между lstat и пульсом: это тоже «удалён», а не ошибка чтения ответа
+          if (!gone) gone = await pulse(file("task")).then(() => false, (error) => (error?.code === "ENOENT" ? true : Promise.reject(error)));
           pulsed = Date.now();
         }
       } catch (error) {

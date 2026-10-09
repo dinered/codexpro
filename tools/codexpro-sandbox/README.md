@@ -1,8 +1,15 @@
 # codexpro-sandbox
 
-codexpro (npm `codexpro@0.30.2`) в контейнере OrbStack: ChatGPT через туннель
-видит только `/workspace` (= `~/work/ai/codexpro/2/sandbox`), а не Mac.
-Внутри контейнера процесс идёт под `node` (uid 1000), не root.
+codexpro (npm `codexpro@0.30.2`) в контейнере OrbStack: файловые инструменты
+ChatGPT через туннель видят только `/workspace` (= `~/work/ai/codexpro/2/sandbox`),
+а не диск Мака. Внутри контейнера процесс идёт под `node` (uid 1000), не root.
+
+Изоляция только файловая. По сети контейнер достаёт до всех сервисов на
+127.0.0.1 Мака (`host.docker.internal`): CDP Chrome, прокси, демоны. А `--bash
+safe` выполняет и скрипты пакетов (`npm test` и т. п.), то есть ChatGPT может
+запустить в контейнере любой код, записав `package.json`. Поэтому
+codexpro-sandbox и Chrome с CDP (раздел «Chrome для ChatGPT») одновременно не
+работают.
 
 Состояние (`~/.codexpro`: токен `http-token`, cloudflared) лежит на томе
 `~/work/ai/codexpro/2/sandbox-codexpro/home` (0700) и переживает перезапуск.
@@ -28,7 +35,9 @@ docker create --name codexpro-sandbox --init \
 ## Запуск и остановка
 
 ```sh
-docker start codexpro-sandbox      # поднимает codexpro и публичный туннель
+# поднимает codexpro и публичный туннель; не запускается, пока открыт Chrome с CDP
+curl -s -m 2 http://127.0.0.1:9222/json/version >/dev/null \
+  && echo "НЕ ЗАПУСКАТЬ: открыт Chrome с CDP (Cmd+Q в его окне)" || docker start codexpro-sandbox
 docker stop codexpro-sandbox       # гасит всё, включая туннель
 ```
 
@@ -48,12 +57,15 @@ sleep 15; docker logs codexpro-sandbox 2>&1 | grep -o 'https://[^ ]*codexpro_tok
 Обычный Chrome с отдельным профилем `~/work/ai/codexpro/2/sandbox-chrome/profile`
 (вне git): оператор сам входит в ChatGPT, Playwright к этому окну только
 подключается по CDP (протокол отладки Chrome). Открывать профиль из Playwright
-(`launchPersistentContext`, `npx playwright open`) нельзя: Chrome под
-автоматизацией выбивает вход в ChatGPT.
+(`launchPersistentContext`, `npx playwright open`) нельзя: Chrome, запущенный
+Playwright, разлогинивает ChatGPT. Вероятная причина — флаги Playwright
+`--use-mock-keychain` и `--password-store=basic`, с которыми Chrome не может
+расшифровать куки профиля (не проверено).
 
 Перед запуском (`AGENTS.md`: только выход `FOREIGN_STRICT`; CDP открыт всё время,
 пока работает этот Chrome, поэтому `codexpro-sandbox` проверяется уже здесь, а не
-только мостом):
+только мостом). Остальные контейнеры и машины OrbStack (`docker --context
+orbstack ps`, `orb list`) тоже видят CDP: остановить их или принять риск явно.
 
 ```sh
 curl -s --unix-socket /tmp/verge/verge-mihomo.sock http://localhost/proxies/FOREIGN \
@@ -98,6 +110,9 @@ await browser.close();   // для CDP только отключается: Chro
 Остановить — Cmd+Q в этом окне Chrome. Процесс не убивать посреди работы.
 
 ## Подключение в ChatGPT
+
+Только в обычном браузере или профиле без CDP — не в Chrome моста: пока работает
+codexpro-sandbox, CDP открыт быть не должен (шапка этого README).
 
 1. Settings → Security and login → Developer mode — включить.
 2. Settings → Plugins → «Добавить» → «Создать пользовательский сервер MCP» →

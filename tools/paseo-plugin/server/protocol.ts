@@ -41,6 +41,8 @@ export function parseName(name: string): { kind: Kind; id: string } | null {
 
 const errno = (error: unknown) => (error as { code?: string }).code;
 
+// #внимание-учебно-аналитический-предохранитель — файлы протокола читаются и пишутся без перехода по ссылкам: в режиме codexpro ChatGPT
+// сам пишет в рабочую папку и мог бы подложить ссылку на ~/.ssh/… (writeAtomic, readRegular, pulse).
 // Атомарная запись: уникальный временный файл (O_EXCL — по подложенной ссылке не пойдёт), fsync,
 // rename поверх (заменяет саму ссылку, не её цель), fsync папки. Читатель видит старое или новое целиком.
 export async function writeAtomic(path: string, data: string): Promise<void> {
