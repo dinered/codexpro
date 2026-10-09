@@ -13,7 +13,7 @@
 // Модуль без зависимостей: его импортирует и плагин, и мост (node main.ts).
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, rename, unlink, utimes } from "node:fs/promises";
+import { lstat, lutimes, open, rename, unlink } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -94,9 +94,11 @@ export async function isFresh(path: string, leaseMs = LEASE_MS, now = Date.now()
   return !!info?.isFile() && now - info.mtimeMs < leaseMs;
 }
 
+// Пульс — время изменения самого файла. lutimes: подложенная ссылка получает время сама, её цель не трогается,
+// а isFresh() ссылку живой не считает.
 export async function pulse(path: string): Promise<void> {
   const now = new Date();
-  await utimes(path, now, now);
+  await lutimes(path, now, now);
 }
 
 // Захват (задачи или единственного экземпляра моста): создать файл с токеном через O_EXCL.

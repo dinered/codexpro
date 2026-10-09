@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { acquire, fileName, isFresh, LEASE_MS, owns, parseName, readRegular, release, writeAtomic } from "./protocol";
+import { acquire, fileName, isFresh, LEASE_MS, owns, parseName, pulse, readRegular, release, writeAtomic } from "./protocol";
 
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const tempDir = () => mkdtemp(join(tmpdir(), "protocol-"));
@@ -55,6 +55,24 @@ describe("протокол v2", () => {
     expect(await isFresh(join(dir, "link.md"))).toBe(false);
     await age(file, LEASE_MS + 1000);
     expect(await isFresh(file)).toBe(false);
+  });
+
+  it("pulse: свежит файл; подложенную ссылку не делает живой и её цель не трогает", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "task.md");
+    await writeFile(file, "задача");
+    await age(file, LEASE_MS + 1000);
+    await pulse(file);
+    expect(await isFresh(file)).toBe(true);
+
+    const target = join(dir, "secret");
+    await writeFile(target, "ключ");
+    await age(target, LEASE_MS + 1000);
+    const before = (await lstat(target)).mtimeMs;
+    await symlink(target, join(dir, "link.md"));
+    await pulse(join(dir, "link.md"));
+    expect((await lstat(target)).mtimeMs).toBe(before);
+    expect(await isFresh(join(dir, "link.md"))).toBe(false);
   });
 
   it("acquire: живой захват не отдаёт, брошенный перехватывает; release снимает только своё", async () => {

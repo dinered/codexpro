@@ -51,11 +51,16 @@ sleep 15; docker logs codexpro-sandbox 2>&1 | grep -o 'https://[^ ]*codexpro_tok
 (`launchPersistentContext`, `npx playwright open`) нельзя: Chrome под
 автоматизацией выбивает вход в ChatGPT.
 
-Перед запуском (`AGENTS.md`: только выход `FOREIGN_STRICT`):
+Перед запуском (`AGENTS.md`: только выход `FOREIGN_STRICT`; CDP открыт всё время,
+пока работает этот Chrome, поэтому `codexpro-sandbox` проверяется уже здесь, а не
+только мостом):
 
 ```sh
 curl -s --unix-socket /tmp/verge/verge-mihomo.sock http://localhost/proxies/FOREIGN \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["now"])'   # FOREIGN_STRICT, иначе не запускать
+docker --context orbstack inspect -f '{{.State.Running}}' codexpro-sandbox 2>&1 \
+  | grep -Eiqx 'false|error: no such object: .*' && echo "codexpro-sandbox не запущен" \
+  || echo "НЕ ЗАПУСКАТЬ: codexpro-sandbox запущен или docker не ответил"
 pgrep -f sandbox-chrome/profile    # пусто: второй Chrome на том же профиле не стартует
 ```
 

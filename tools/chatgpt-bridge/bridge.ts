@@ -2,6 +2,7 @@
 // Плагин codexpro-worker кладёт задачу в <root>/<сессия>/task-<id>.md и пульсирует её, пока ход идёт.
 // Мост захватывает задачу (claim-<id>), вводит текст в открытый чат ChatGPT, ждёт конца ответа и пишет
 // ответ в markdown в reply-<id>.md; не вышло — причину в error-<id>.md.
+// Учебный мост: каждое ограничение работы с ChatGPT помечено #внимание-учебно-аналитический-предохранитель (AGENTS.md).
 import type { Page } from "playwright-core";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,8 +34,15 @@ export const SEL = {
   done: 'button[aria-label="Сгенерировать ответ заново"]', // появляется в паре, когда ответ готов
 };
 
-// Только существующий чат: новый сменил бы адрес после первого сообщения, а мост привязан к адресу.
+// #внимание-учебно-аналитический-предохранитель — только существующий чат: новых чатов мост не открывает (новый сменил бы адрес
+// после первого сообщения, а мост привязан к адресу).
 export const CHAT_URL = /^https:\/\/chatgpt\.com\/c\/[\w-]+/;
+
+// #внимание-учебно-аналитический-предохранитель — лимит сообщений за запуск (Issue #2 п. 6: не больше 500) и пауза
+// между ними: не чаще одного сообщения в PAUSE_MS. Проверяются в ядре, не только в CLI.
+export const MAX_LIMIT = 500;
+export const DEFAULT_LIMIT = 20;
+export const PAUSE_MS = 20_000;
 
 export class FatalError extends Error {} // остановить мост целиком
 export class TaskError extends Error {} // задача не выполнена (error-<id>.md), мост работает дальше
@@ -42,7 +50,8 @@ export class TaskError extends Error {} // задача не выполнена 
 export interface BridgeOptions {
   page: Page;
   root: string; // каталог .ai-bridge/paseo
-  limit?: number; // сообщений за запуск
+  limit?: number; // сообщений за запуск, 1..MAX_LIMIT
+  pauseMs?: number; // наименьший промежуток между отправками; меньше PAUSE_MS — только для тестов
   pollMs?: number;
   startTimeoutMs?: number; // ChatGPT не принял сообщение или не начал отвечать
   answerTimeoutMs?: number; // от начала ответа
@@ -70,7 +79,8 @@ export function normalize(s: string): string {
 export async function runBridge({
   page,
   root,
-  limit = 500,
+  limit = DEFAULT_LIMIT,
+  pauseMs = PAUSE_MS,
   pollMs = 1000,
   startTimeoutMs = 120_000,
   answerTimeoutMs = 600_000,
@@ -79,18 +89,26 @@ export async function runBridge({
   log = console.log,
   signal,
 }: BridgeOptions): Promise<{ sent: number }> {
+  // #внимание-учебно-аналитический-предохранитель — лимит в пределах 1..MAX_LIMIT при любом вызове ядра
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+    throw new FatalError(`лимит сообщений за запуск — целое от 1 до ${MAX_LIMIT}, задано: ${limit}`);
+  }
+  // #внимание-учебно-аналитический-предохранитель — каталог задач не ссылка: в режиме codexpro ChatGPT сам пишет в рабочую папку
   if (!(await lstat(root).catch(() => null))?.isDirectory()) throw new FatalError(`нет каталога задач (или это ссылка): ${root}`);
   const token = ownerToken();
   const lock = join(root, BRIDGE_LOCK);
+  // #внимание-учебно-аналитический-предохранитель — один мост на каталог задач: второй не стартует
   if (!(await acquire(lock, token, leaseMs))) throw new FatalError("другой мост уже работает");
 
   const url = page.url();
   const composer = page.locator(SEL.composer);
   const stop = page.locator(SEL.stop).visible().first();
-  const sentIds = new Set<string>(); // отправленное второй раз не уходит, что бы ни стало с файлами
+  // #внимание-учебно-аналитический-предохранитель — отправленное второй раз не уходит, что бы ни стало с файлами
+  const sentIds = new Set<string>();
   let sent = 0;
+  let sentAt = -Infinity; // последняя отправка — для паузы
 
-  // Каждый опрос: замок наш и жив, вкладка в том же чате.
+  // #внимание-учебно-аналитический-предохранитель — каждый опрос и прямо перед Enter: замок наш и жив, вкладка в том же чате.
   async function beat() {
     await pulse(lock).catch(() => {});
     if (!(await owns(lock, token))) throw new FatalError("замок моста потерян — запущен другой мост?");
@@ -100,6 +118,7 @@ export async function runBridge({
   // Задача ещё нужна и захват наш (заодно продлить его). До Enter задача нужна, пока плагин её пульсирует;
   // после Enter — пока файл задачи на месте: пульс мог пропасть на время сна Мака, а сообщение уже ушло,
   // и брошенный без reply/error ход висел бы в Paseo. «Стоп» в Paseo удаляет файл задачи.
+  // #внимание-учебно-аналитический-предохранитель — задача без пульса плагина (остаток мёртвого хода) не уходит.
   async function wanted(task: Task, entered = false) {
     const claim = fileOf(task, "claim");
     const file = fileOf(task, "task");
@@ -109,7 +128,8 @@ export async function runBridge({
     return true;
   }
 
-  // Живые задачи без ответа, старые первыми. Ссылки (на папки и файлы) пропускаются.
+  // Живые задачи без ответа, старые первыми.
+  // #внимание-учебно-аналитический-предохранитель — ссылки (на папки и файлы) пропускаются: их мог подложить ChatGPT.
   async function pending() {
     const tasks: Task[] = [];
     for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -159,6 +179,7 @@ export async function runBridge({
   // ponytail: опрос раз в pollMs, без MutationObserver — конец ответа виден с задержкой до 2×pollMs
   async function ask(task: Task, text: string): Promise<string | null> {
     if (!(await composer.isVisible())) throw new FatalError("нет поля ввода ChatGPT — вход слетел?");
+    // #внимание-учебно-аналитический-предохранитель — чат занят (идёт ответ или черновик в поле ввода): в чужой ход мост не вмешивается
     if ((await stop.isVisible()) || (await composer.innerText()).trim()) {
       throw new FatalError("чат ChatGPT занят: идёт ответ или в поле ввода есть текст — мост его не трогает");
     }
@@ -183,10 +204,11 @@ export async function runBridge({
     await beat(); // прямо перед Enter: вкладка всё ещё в том чате и замок наш
     await page.keyboard.press("Enter");
     sent++;
+    sentAt = Date.now();
     sentIds.add(task.id);
     log(`${task.session}/${task.id}: отправлено в ChatGPT (${sent}/${limit})`);
-    // дальше повторов нет: повтор отправил бы сообщение дважды
-    const sentAt = Date.now();
+    // #внимание-учебно-аналитический-предохранитель — после Enter повторов нет: повтор отправил бы сообщение дважды
+    const enteredAt = sentAt;
     let key = ""; // наша пара
     let acceptedAt = 0;
     let startedAt = 0;
@@ -194,6 +216,7 @@ export async function runBridge({
     for (;;) {
       await sleep(pollMs);
       await beat();
+      // #внимание-учебно-аналитический-предохранитель — «Стоп» в Paseo или остановка моста оператором: «Остановить» в ChatGPT
       if (signal?.aborted || !(await wanted(task, true))) {
         await stopAndWaitIdle();
         return null;
@@ -201,10 +224,12 @@ export async function runBridge({
       const now = Date.now();
       if (!key) {
         const fresh = (await turnKeys()).filter((k) => !before.has(k)); // не по числу пар: старые выгружаются
+        // #внимание-учебно-аналитический-предохранитель — в чате только сообщения моста: чужое или не тот текст — стоп
         if (fresh.length > 1) throw new FatalError("в чат ChatGPT пишет кто-то ещё");
         const bubble = fresh.length ? (await readTurnOf(fresh[0])).bubble : "";
         if (!bubble.trim()) {
-          if (now - sentAt < startTimeoutMs) continue;
+          if (now - enteredAt < startTimeoutMs) continue;
+          // #внимание-учебно-аналитический-предохранитель — ChatGPT не принял сообщение (лимит, капча, вход): мост останавливается, обходить не пытается
           throw new FatalError(`ChatGPT не принял сообщение за ${startTimeoutMs / 1000} с: лимит, капча или вход слетел?`);
         }
         if (normalize(bubble) !== normalize(text)) throw new FatalError("в чате ChatGPT ушёл не тот текст, что вводил мост");
@@ -214,6 +239,7 @@ export async function runBridge({
       const turn = await readTurnOf(key);
       const busy = await stop.isVisible();
       if (!startedAt && (busy || turn.markdown)) startedAt = now;
+      // #внимание-учебно-аналитический-предохранитель — сроки: не начал отвечать или не закончил — «Остановить» и ошибка задачи
       if (!startedAt && now - acceptedAt > startTimeoutMs) {
         await stopAndWaitIdle();
         throw new TaskError(`ChatGPT не начал отвечать за ${startTimeoutMs / 1000} с`);
@@ -255,11 +281,13 @@ export async function runBridge({
     if (!CHAT_URL.test(url)) throw new FatalError("вкладка ChatGPT должна быть открыта в существующем чате (https://chatgpt.com/c/…)");
     while (sent < limit && !signal?.aborted) {
       await beat();
-      for (const task of await pending()) {
+      // #внимание-учебно-аналитический-предохранитель — пауза ждётся до захвата задачи: захват за время паузы не протухнет
+      const tasks = Date.now() - sentAt >= pauseMs ? await pending() : [];
+      for (const task of tasks) {
         const claim = await acquire(fileOf(task, "claim"), token, leaseMs);
         if (!claim) continue; // её ведёт другой исполнитель
         if (claim === "taken-over") {
-          // прошлый мост упал с этой задачей и мог успеть её отправить: повтор — второе сообщение в ChatGPT
+          // #внимание-учебно-аналитический-предохранитель — прошлый мост упал с этой задачей и мог успеть её отправить: повтор — второе сообщение в ChatGPT
           await writeAtomic(fileOf(task, "error"), "мост упал во время задачи, сообщение могло уйти в ChatGPT — проверьте чат");
           await release(fileOf(task, "claim"), token);
           log(`${task.session}/${task.id}: брошена упавшим мостом, не отправляется`);
@@ -274,6 +302,9 @@ export async function runBridge({
     return { sent };
   } finally {
     await release(lock, token);
+    // #модельный-учебно-аналитический-контроль — итог при любом исходе, в том числе при FatalError:
+    // по нему Claude сверяет прогон (tools/chatgpt-bridge/README.md, «Живой прогон»)
+    log(`отправлено сообщений за запуск: ${sent} из ${limit}`);
   }
 }
 
@@ -349,7 +380,11 @@ function readTurn(turns: Element[], sel: typeof SEL) {
       let n = tag === "OL" ? (el as HTMLOListElement).start : 1;
       return [...el.children]
         .filter((li) => li.tagName === "LI")
-        .map((li) => (tag === "OL" ? `${n++}. ` : "- ") + blocks(li).join("\n").replace(/\n(?!\n)/g, "\n  "))
+        .map((li) => {
+          const marker = tag === "OL" ? `${n++}. ` : "- ";
+          // продолжение пункта — с отступом на ширину маркера (CommonMark): «- » — 2, «9. » — 3, «10. » — 4
+          return marker + blocks(li).join("\n").replace(/\n(?!\n)/g, "\n" + " ".repeat(marker.length));
+        })
         .join("\n");
     }
     if (tag === "BLOCKQUOTE") return blocks(el).join("\n\n").replace(/^/gm, "> ");

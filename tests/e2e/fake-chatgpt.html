@@ -8,8 +8,8 @@
      пока ответ идёт, вместо «Отправить» — «Остановить», в конце — панель действий с «Сгенерировать ответ заново».
      ?think=мс — сначала «Думаю…»; ?pause=мс — пауза посреди ответа, «Остановить» на экране; ?hang — первый ответ
      не кончается; ?noanswer — первое сообщение принято, ответа нет; ?busy — «Остановить» на экране с самого начала;
-     ?keep=N — в DOM только N последних пар (длинный чат выгружает старые).
-     window.sent — отправленные тексты, window.stopped — нажатия «Остановить». -->
+     ?keep=N — в DOM только N последних пар (длинный чат выгружает старые); ?reject — Enter не принимается (лимит, капча).
+     window.sent — отправленные тексты, window.sentAt — время их отправки (мс), window.stopped — нажатия «Остановить». -->
 <style>
   [contenteditable] { min-height: 2em; border: 1px solid #999; }
   [data-user-message-bubble] { white-space: pre-wrap; }
@@ -43,7 +43,7 @@
   const REPLY =
     "<p></p><h3>Итог</h3>" +
     "<ul><li>первый пункт<ul><li>вложенный пункт</li></ul></li><li>второй с <code>кодом</code></li></ul>" +
-    "<ol><li>раз</li><li>два</li></ol>" +
+    '<ol start="9"><li>девять<ul><li>под девятью</li></ul></li><li>десять<ul><li>под десятью</li></ul></li></ol>' +
     '<pre><div><span>bash</span><button type="button">Копировать</button></div>' +
     '<div><code class="language-bash">echo привет\nls -la</code></div></pre>' +
     "<table><thead><tr><th>Ключ</th><th>Значение</th></tr></thead><tbody><tr><td>a</td><td>1</td></tr></tbody></table>" +
@@ -51,6 +51,7 @@
     '<p>Ссылка: <a href="https://example.com/">пример</a>, <strong>жирный</strong> и <em>курсив</em>.</p>';
 
   window.sent = [];
+  window.sentAt = [];
   window.stopped = 0;
   let generating = q.has("busy");
   let generation = 0; // конец ответа и «Остановить» меняют номер — идущий ответ это видит и замирает
@@ -82,9 +83,10 @@
 
   function send() {
     const text = box.innerText.trim();
-    if (!text || generating) return;
+    if (!text || generating || q.has("reject")) return;
     box.replaceChildren();
     window.sent.push(text);
+    window.sentAt.push(Date.now());
     const turn = document.createElement("div");
     turn.dataset.turnKey = crypto.randomUUID();
     turn.innerHTML =

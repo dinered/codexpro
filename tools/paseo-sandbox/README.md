@@ -18,6 +18,8 @@ docker inspect -f '{{.State.Health.Status}}' paseo-sandbox   # ждём healthy
 ```
 
 Дальше `p` = `docker exec --user paseo paseo-sandbox` (от root в контейнере команды ставят файлы не тому владельцу).
+Командам `paseo` демон указывается явно, `--host 127.0.0.1:6767`: в контейнере демон работает под
+супервизором, и поиск «локального демона» по умолчанию его не находит (`Daemon is not running`).
 
 ## Включить плагины
 
@@ -25,31 +27,31 @@ docker inspect -f '{{.State.Health.Status}}' paseo-sandbox   # ждём healthy
 `"pluginsEnabled": true`, затем:
 
 ```sh
-docker exec --user paseo paseo-sandbox paseo reload --json
+docker exec --user paseo paseo-sandbox paseo reload --json --host 127.0.0.1:6767
 ```
 
 ## Установка и переустановка плагина
 
 ```sh
-docker exec --user paseo paseo-sandbox paseo plugin install /plugins/codexpro-worker
-docker exec --user paseo paseo-sandbox paseo plugin ls                     # running
-docker exec --user paseo paseo-sandbox paseo plugin logs codexpro-worker   # без ошибок
+docker exec --user paseo paseo-sandbox paseo plugin install /plugins/codexpro-worker --host 127.0.0.1:6767
+docker exec --user paseo paseo-sandbox paseo plugin ls --host 127.0.0.1:6767                     # running
+docker exec --user paseo paseo-sandbox paseo plugin logs codexpro-worker --host 127.0.0.1:6767   # без ошибок
 ```
 
 После правок кода: копия без `node_modules` и перезагрузка.
 
 ```sh
 rsync -a --delete --exclude node_modules tools/paseo-plugin/ $S/plugins/codexpro-worker/
-docker exec --user paseo paseo-sandbox paseo plugin reload codexpro-worker
+docker exec --user paseo paseo-sandbox paseo plugin reload codexpro-worker --host 127.0.0.1:6767
 ```
 
 ## Проверка через CLI
 
 ```sh
-docker exec --user paseo paseo-sandbox paseo run -d --provider codexpro/chatgpt --cwd /workspace "Короткая задача"
+docker exec --user paseo paseo-sandbox paseo run -d --host 127.0.0.1:6767 --provider codexpro/chatgpt --cwd /workspace "Короткая задача"
 ls $S/../sandbox/.ai-bridge/paseo/*/task-*.md                # задача появилась: <сессия>/task-<id>.md
 echo "Ответ из песочницы" > $S/../sandbox/.ai-bridge/paseo/<сессия>/reply-<id>.md
-docker exec --user paseo paseo-sandbox paseo logs <агент>    # ответ есть, ход завершён
+docker exec --user paseo paseo-sandbox paseo logs <агент> --host 127.0.0.1:6767    # ответ есть, ход завершён
 ```
 
 Без `-d` `paseo run` ждёт завершения хода, то есть появления `reply-<id>.md`.
