@@ -101,9 +101,10 @@ export async function pulse(path: string): Promise<void> {
 
 // Захват (задачи или единственного экземпляра моста): создать файл с токеном через O_EXCL.
 // Занят живым владельцем — false; брошен (нет пульса leaseMs) — снять и попробовать ещё раз.
+// "taken-over" — захват перехвачен у упавшего владельца: тот мог успеть сделать часть работы.
 // ponytail: двое одновременно перехватывают брошенный захват — один может снять свежий захват другого;
 // поэтому владелец сверяет owns() на каждом пульсе и уступает, если токен в файле уже не его.
-export async function acquire(path: string, token: string, leaseMs = LEASE_MS): Promise<boolean> {
+export async function acquire(path: string, token: string, leaseMs = LEASE_MS): Promise<false | "created" | "taken-over"> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o644);
@@ -113,7 +114,7 @@ export async function acquire(path: string, token: string, leaseMs = LEASE_MS): 
       } finally {
         await file.close();
       }
-      return true;
+      return attempt ? "taken-over" : "created";
     } catch (error) {
       if (errno(error) !== "EEXIST") throw error;
     }

@@ -155,6 +155,37 @@ test("задача без пульса плагина (остаток мёртв
   for (const path of [dead.claim, dead.reply, dead.error]) expect(existsSync(path), path).toBe(false);
 });
 
+test("захват упавшего моста (без пульса): задача не отправляется повторно — error-<id>.md", async ({ page }) => {
+  await openChat(page);
+  const root = await newRoot();
+  const orphan = await task(root, "s1", "отправлена упавшим мостом");
+  await writeFile(orphan.claim, "упавший мост");
+  await age(orphan.claim, LEASE_MS + 5_000);
+  const next = await task(root, "s2", "следующая");
+
+  const bridge = start(page, root);
+  await handled(orphan);
+  await handled(next);
+  expect(await bridge.stop()).toEqual({ sent: 1 });
+  expect(await sent(page)).toEqual(["следующая"]);
+  expect(await read(orphan.error)).toContain("мост упал");
+  expect(existsSync(orphan.reply)).toBe(false);
+});
+
+test("пульс плагина пропал после Enter (сон Мака), файл задачи на месте — ответ всё равно отдан", async ({ page }) => {
+  await openChat(page, "?ms=50");
+  const root = await newRoot();
+  const a = await task(root, "s1", "задача во сне");
+
+  const bridge = start(page, root);
+  await expect(page.locator(SEL.answer)).toContainText("Эхо"); // Enter уже был
+  await age(a.task, LEASE_MS + 5_000);
+  await handled(a);
+  expect(await bridge.stop()).toEqual({ sent: 1 });
+  expect(await stopped(page)).toBe(0);
+  expect(await read(a.reply)).toContain("Эхо: задача во сне");
+});
+
 test("задачу под живым чужим захватом мост не трогает", async ({ page }) => {
   await openChat(page);
   const root = await newRoot();

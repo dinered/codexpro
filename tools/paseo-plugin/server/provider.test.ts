@@ -124,7 +124,7 @@ describe("провайдер codexpro, протокол v2", () => {
 
   it("«Стоп» отменяет ход и удаляет все файлы задачи, включая захват моста", async () => {
     const { connection, events, box, id, file } = await startTurn();
-    expect(await acquire(file("claim"), "токен моста")).toBe(true);
+    expect(await acquire(file("claim"), "токен моста")).toBe("created");
 
     await connection.send({ type: "session.interrupt", requestId: "stop-1", sessionId: "s1" });
 

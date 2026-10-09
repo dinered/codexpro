@@ -47,11 +47,17 @@ const browser = await chromium
   .connectOverCDP("http://127.0.0.1:9222")
   .catch((error) => fail(`нет Chrome с отладкой на 127.0.0.1:9222 (tools/codexpro-sandbox/README.md): ${error.message}`));
 const abort = new AbortController();
-process.on("SIGINT", () => {
-  if (abort.signal.aborted) process.exit(130);
-  abort.abort();
-  console.log("мост останавливается, идущий ответ ChatGPT будет остановлен; Ctrl+C ещё раз — выйти сразу");
-});
+// SIGTERM и SIGHUP (закрыли окно терминала) — как Ctrl+C: без этого мост умер бы посреди ответа,
+// не сняв захват, и следующий запуск счёл бы задачу брошенной.
+process.stdout.on("error", () => {}); // после SIGHUP терминала нет: запись в него не должна ронять мост
+process.stderr.on("error", () => {});
+for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(name, () => {
+    if (abort.signal.aborted) process.exit(130);
+    abort.abort();
+    console.log("мост останавливается, идущий ответ ChatGPT будет остановлен; Ctrl+C ещё раз — выйти сразу");
+  });
+}
 try {
   const pages = browser.contexts().flatMap((c) => c.pages()).filter((p) => p.url().startsWith("https://chatgpt.com/"));
   if (pages.length !== 1) throw new FatalError(`нужна ровно одна вкладка chatgpt.com, открыто: ${pages.length}`);

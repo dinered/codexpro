@@ -97,10 +97,14 @@ export async function runBridge({
     if (page.url() !== url) throw new FatalError("вкладка ChatGPT ушла из чата, к которому привязан мост");
   }
 
-  // Задача ещё нужна: плагин её пульсирует и захват наш (заодно продлить его).
-  async function wanted(task: Task) {
+  // Задача ещё нужна и захват наш (заодно продлить его). До Enter задача нужна, пока плагин её пульсирует;
+  // после Enter — пока файл задачи на месте: пульс мог пропасть на время сна Мака, а сообщение уже ушло,
+  // и брошенный без reply/error ход висел бы в Paseo. «Стоп» в Paseo удаляет файл задачи.
+  async function wanted(task: Task, entered = false) {
     const claim = fileOf(task, "claim");
-    if (!(await isFresh(fileOf(task, "task"), leaseMs)) || !(await owns(claim, token))) return false;
+    const file = fileOf(task, "task");
+    const alive = entered ? !!(await lstat(file).catch(() => null))?.isFile() : await isFresh(file, leaseMs);
+    if (!alive || !(await owns(claim, token))) return false;
     await pulse(claim).catch(() => {});
     return true;
   }
@@ -134,7 +138,7 @@ export async function runBridge({
       if (!text.trim()) throw new TaskError("пустая задача");
       const answer = await ask(task, text);
       if (answer !== null) {
-        if (!(await wanted(task))) return log(`${name}: ход отменён, ответ не отдан`);
+        if (!(await wanted(task, true))) return log(`${name}: ход отменён, ответ не отдан`);
         await writeAtomic(fileOf(task, "reply"), answer);
         return log(`${name}: ответ отдан`);
       }
@@ -176,6 +180,7 @@ export async function runBridge({
       return null;
     }
 
+    await beat(); // прямо перед Enter: вкладка всё ещё в том чате и замок наш
     await page.keyboard.press("Enter");
     sent++;
     sentIds.add(task.id);
@@ -189,7 +194,7 @@ export async function runBridge({
     for (;;) {
       await sleep(pollMs);
       await beat();
-      if (signal?.aborted || !(await wanted(task))) {
+      if (signal?.aborted || !(await wanted(task, true))) {
         await stopAndWaitIdle();
         return null;
       }
@@ -251,7 +256,15 @@ export async function runBridge({
     while (sent < limit && !signal?.aborted) {
       await beat();
       for (const task of await pending()) {
-        if (!(await acquire(fileOf(task, "claim"), token, leaseMs))) continue; // её ведёт другой исполнитель
+        const claim = await acquire(fileOf(task, "claim"), token, leaseMs);
+        if (!claim) continue; // её ведёт другой исполнитель
+        if (claim === "taken-over") {
+          // прошлый мост упал с этой задачей и мог успеть её отправить: повтор — второе сообщение в ChatGPT
+          await writeAtomic(fileOf(task, "error"), "мост упал во время задачи, сообщение могло уйти в ChatGPT — проверьте чат");
+          await release(fileOf(task, "claim"), token);
+          log(`${task.session}/${task.id}: брошена упавшим мостом, не отправляется`);
+          continue;
+        }
         await handle(task);
         break; // после ответа очередь читается заново
       }

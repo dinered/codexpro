@@ -60,12 +60,12 @@ describe("протокол v2", () => {
   it("acquire: живой захват не отдаёт, брошенный перехватывает; release снимает только своё", async () => {
     const dir = await tempDir();
     const claim = join(dir, fileName("claim", ID));
-    expect(await acquire(claim, "A")).toBe(true);
+    expect(await acquire(claim, "A")).toBe("created");
     expect(await acquire(claim, "B")).toBe(false);
     expect(await owns(claim, "A")).toBe(true);
 
     await age(claim, LEASE_MS + 1000);
-    expect(await acquire(claim, "B")).toBe(true);
+    expect(await acquire(claim, "B")).toBe("taken-over");
     expect(await owns(claim, "A")).toBe(false);
 
     await release(claim, "A");
