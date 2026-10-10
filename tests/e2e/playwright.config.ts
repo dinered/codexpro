@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// #учебно-не-боевое-22 — тесты гоняют руками: в CI их нет (задание smoke печатает «smoke ok»), paseo требует контейнер
+// на Маке оператора. В бою — все тесты в CI на каждый MR, обязательные для слияния (docs/training-vs-production.md).
 export default defineConfig({
   testDir: ".",
   timeout: 120_000,

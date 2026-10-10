@@ -11,6 +11,8 @@
 // Исполнитель берёт задачу, только если пульс плагина свежий: задача без пульса — остаток мёртвого хода.
 // Файлы читаются без перехода по ссылкам: в режиме codexpro ChatGPT сам пишет в рабочую папку.
 // Модуль без зависимостей: его импортирует и плагин, и мост (node main.ts).
+// #учебно-не-боевое-07 — очередь — папка с файлами; в бою — брокер сообщений с подтверждениями и DLQ или прямой вызов
+// API без посредника (docs/training-vs-production.md).
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, lutimes, open, rename, unlink } from "node:fs/promises";
@@ -43,6 +45,8 @@ const errno = (error: unknown) => (error as { code?: string }).code;
 
 // #внимание-учебно-аналитический-предохранитель — файлы протокола читаются и пишутся без перехода по ссылкам: в режиме codexpro ChatGPT
 // сам пишет в рабочую папку и мог бы подложить ссылку на ~/.ssh/… (writeAtomic, readRegular, pulse).
+// #учебно-не-боевое-13 — защита — гигиена файлов в папке, общей с ChatGPT; кто написал файл, не проверяется. В бою канал
+// управления отделён от данных: другая учётка ОС или очередь, подпись сообщений.
 // Атомарная запись: уникальный временный файл (O_EXCL — по подложенной ссылке не пойдёт), fsync,
 // rename поверх (заменяет саму ссылку, не её цель), fsync папки. Читатель видит старое или новое целиком.
 export async function writeAtomic(path: string, data: string): Promise<void> {
@@ -67,6 +71,7 @@ async function syncDir(dir: string) {
   const handle = await open(dir, constants.O_RDONLY).catch(() => null);
   if (!handle) return;
   // ponytail: fsync папки — best effort; часть ФС (virtiofs, тома Docker) его не поддерживает
+  // #учебно-не-боевое-09 — в бою — хранилище с заявленными гарантиями записи
   await handle.sync().catch(() => {});
   await handle.close();
 }
@@ -108,6 +113,7 @@ export async function pulse(path: string): Promise<void> {
 // "taken-over" — захват перехвачен у упавшего владельца: тот мог успеть сделать часть работы.
 // ponytail: двое одновременно перехватывают брошенный захват — один может снять свежий захват другого;
 // поэтому владелец сверяет owns() на каждом пульсе и уступает, если токен в файле уже не его.
+// #учебно-не-боевое-08 — аренда по mtime (зависит от часов и ФС); в бою — аренда в брокере или БД и токен ограждения.
 export async function acquire(path: string, token: string, leaseMs = LEASE_MS): Promise<false | "created" | "taken-over"> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {

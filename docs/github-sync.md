@@ -126,7 +126,9 @@ fast-forward.
 ## Риски
 
 - Правки с GitHub приходят в `main` GitLab мимо MR, merge train и ревью — так
-  решил оператор (нота 6773 в Issue #4).
+  решил оператор (нота 6773 в Issue #4). Учебное `#учебно-не-боевое-24`: в бою
+  `main` меняется только через MR с ревью и CI
+  ([`training-vs-production.md`](training-vs-production.md)).
 - Токен GitLab с ролью Maintainer: его утечка даёт права мейнтейнера проекта.
 - PAT GitHub выдан на все репозитории `dinered` (решение оператора): его утечка
   с раннера даёт запись во все из них, а не только в `dinered/codexpro`.
