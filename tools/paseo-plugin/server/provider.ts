@@ -70,6 +70,7 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
     const result = (value: Extract<ProviderEvent, { type: "session.prompt_result" }>["result"]) =>
       emit({ type: "session.prompt_result", sessionId, clientMessageId: prompt.clientMessageId, result: value });
     if (prompt.input.type !== "message") return result({ type: "failed", error: { message: "Только текст" } });
+    // #учебно-не-боевое-12 — один ход за раз, только текст, без steer; в бою — очередь сессии, вложения, параллельные ходы
     if (session.active) {
       return result({ type: "failed", error: { message: "Предыдущая задача ещё ждёт ответа ChatGPT" } });
     }
@@ -118,6 +119,7 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
     });
 
     // ponytail: опрос папки раз в pollMs (fs.watch ненадёжен на томах Docker); ответ виден с задержкой до 2×pollMs
+    // #учебно-не-боевое-10 — в бою — подписка на очередь или поток ответа API
     let last: string | null = null;
     let pulsed = Date.now();
     const tick = async () => {
@@ -155,6 +157,7 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
   }
 
   // ponytail: без session.persistence — после перезапуска демона ожидающий ход теряется
+  // #учебно-не-боевое-11 — состояние хода только в памяти; в бою — в хранилище, с восстановлением после перезапуска
   async function dispatch(input: ProviderInput) {
     switch (input.type) {
       case "catalog":

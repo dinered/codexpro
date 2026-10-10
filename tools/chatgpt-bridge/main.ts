@@ -1,5 +1,7 @@
 // Запуск моста: node main.ts [каталог .ai-bridge/paseo] [--limit N]. Chrome с ChatGPT — tools/codexpro-sandbox/README.md.
 // Запускает только человек, вручную (Issue #2 п. 6): автозапуска, демона и расписания у моста нет.
+// #учебно-не-боевое-01 — браузер, CDP и прокси нужны только веб-ChatGPT; в бою весь этот файл не нужен
+// (docs/training-vs-production.md).
 import { chromium } from "playwright-core";
 import { execFile } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -12,12 +14,15 @@ import { parseArgs } from "node:util";
 import { DEFAULT_LIMIT, FatalError, MAX_LIMIT, runBridge } from "./bridge.ts";
 import { chromeVerdict, containersVerdict, journalLine, stopSignalAction } from "./cli.ts";
 
+// #учебно-не-боевое-19 — пути, порты и контекст docker записаны в коде, запуск — человек в терминале; в бою — сервис
+// под супервизором с конфигурацией снаружи. Ручной запуск здесь — сам по себе предохранитель.
 const MIHOMO = "/tmp/verge/verge-mihomo.sock";
 const WORK = join(homedir(), "work/ai/codexpro/2");
 const PROFILE = join(WORK, "sandbox-chrome/profile");
 // #модельный-учебно-аналитический-контроль — журнал прогонов вне песочницы. Пишет его сам мост, поэтому журнал
 // переживает закрытое окно терминала; текстов задач и ответов в нём нет. По нему Claude сверяет прогон с чек-листом
 // tools/chatgpt-bridge/README.md («Живой прогон»): проверки, лимит, паузы, сколько отправлено, почему мост остановился.
+// #учебно-не-боевое-20 — журнал — текстовый файл для глаз; в бою — структурные логи, метрики, алерты и аудит.
 const JOURNAL = join(WORK, "bridge-runs.log");
 
 function log(line: string) {
@@ -42,6 +47,8 @@ function run(command: string, args: string[]) {
 
 // #внимание-учебно-аналитический-предохранитель — AGENTS.md: ChatGPT под Playwright только через выход FOREIGN_STRICT
 // (группа FOREIGN в mihomo Clash Verge); что Chrome ходит именно через эту группу — проверка Chrome ниже.
+// #учебно-не-боевое-15 — сеть проверяется один раз при запуске: смену группы во время прогона мост не заметит; в бою
+// маршрут закрепляет сетевая политика, и приложению нечего проверять.
 async function foreignNow(): Promise<unknown> {
   const response = await new Promise<IncomingMessage>((resolve, reject) =>
     get({ socketPath: MIHOMO, path: "/proxies/FOREIGN" }, resolve).on("error", reject),
@@ -105,6 +112,8 @@ if (chrome) fail(chrome);
 await mkdir(root, { recursive: true }).catch((error) => fail(`не удалось создать каталог задач ${root}: ${error.message}`));
 // #внимание-учебно-аналитический-предохранитель — только подключение к уже открытому Chrome оператора: браузер мост
 // не запускает (свой запуск ещё и выбивает вход в ChatGPT).
+// #учебно-не-боевое-16 — работает от имени личного аккаунта оператора, с его памятью и коннекторами; в бою — сервисная
+// учётка организации и ключ API из хранилища секретов.
 const browser = await chromium
   .connectOverCDP("http://127.0.0.1:9222")
   .catch((error) => fail(`нет Chrome с отладкой на 127.0.0.1:9222 (tools/codexpro-sandbox/README.md): ${error.message}`));

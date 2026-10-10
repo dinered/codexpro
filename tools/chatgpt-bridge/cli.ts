@@ -4,6 +4,8 @@
 // через вход mihomo 17891 (группа FOREIGN, AGENTS.md). Без этой проверки мост подключился бы к любому Chrome с
 // открытым CDP — например, к другому окну оператора с его собственной перепиской в ChatGPT.
 // commands — командные строки процессов, слушающих порт (lsof → ps); null — можно подключаться.
+// #учебно-не-боевое-14 — «тот ли Chrome» и «кто рядом» — эвристики по выводу ps и docker при CDP без пароля; в бою
+// браузера нет, а если нужен — изолированная машина, которую задаёт оркестратор.
 export const CHROME_PROXY = "--proxy-server=socks5://127.0.0.1:17891";
 // Флаги, с которыми Chrome ходит мимо --proxy-server, то есть мимо FOREIGN_STRICT.
 const PROXY_BYPASS = ["--no-proxy-server", "--proxy-pac-url", "--proxy-auto-detect", "--proxy-bypass-list"];

@@ -21,6 +21,7 @@ test.beforeAll(async () => {
 });
 
 // Пароль читаем из файла 0600 и нигде не печатаем.
+// #учебно-не-боевое-17 — секрет в файле на диске; в бою тест получает его из хранилища секретов CI.
 function daemonPassword(): string {
   const m = readFileSync(join(ROOT, "sandbox-paseo/paseo.env"), "utf8").match(/^PASEO_PASSWORD=(.+)$/m);
   if (!m) throw new Error("PASEO_PASSWORD not found in paseo.env");

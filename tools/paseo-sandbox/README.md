@@ -4,6 +4,13 @@ Docker (OrbStack), контейнер `paseo-sandbox`, порт только н�
 Каталог песочницы `S=~/work/ai/codexpro/<issue>/sandbox-paseo` (вне git); рабочая папка агентов —
 git-репозиторий `~/work/ai/codexpro/<issue>/sandbox` (в контейнере `/workspace`).
 
+Учебные упрощения (разбор — [`docs/training-vs-production.md`](../../docs/training-vs-production.md)):
+
+- `#учебно-не-боевое-17` — пароль демона лежит в `paseo.env` (0600) на диске. В бою — хранилище
+  секретов и TLS на входе.
+- `#учебно-не-боевое-23` — плагин попадает в песочницу копией `rsync`, без сборки и версии; Paseo — beta.
+  В бою — подписанный артефакт из CI и стабильный релиз.
+
 ## Подъём с нуля
 
 ```sh
