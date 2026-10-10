@@ -96,8 +96,8 @@ if (now !== "FOREIGN_STRICT") fail(`группа FOREIGN в mihomo стоит н
 const containers = await run("docker", ["--context", "orbstack", "ps", "-a", "--format", "{{.Names}}\t{{.State}}"]);
 const { refusal, running } = containersVerdict(containers.error, containers.stdout, containers.stderr);
 if (refusal) fail(refusal);
-// #учебно-не-боевое-14 — машины OrbStack — разбор табличного вывода orb list, без тестов; сбой или незнакомый вывод
-// отказа не вызывает, только запись в журнал. В бою браузер, если он нужен, — на машине без других жильцов.
+// #учебно-не-боевое-14 — машины OrbStack — разбор табличного вывода orb list, без тестов; сбой отказа не вызывает и
+// пишется как «не удалось узнать», а незнакомый вывод журнал покажет как «нет». В бою браузер, если он нужен, — на машине без других жильцов.
 const machines = await run("orb", ["list"]);
 const vms = machines.stdout.split("\n").filter((line) => /\srunning\s/.test(line)).map((line) => line.split(/\s+/)[0]);
 // #модельный-учебно-аналитический-контроль — кто ещё видит CDP этого Chrome: чек-лист требует остановить или принять явно

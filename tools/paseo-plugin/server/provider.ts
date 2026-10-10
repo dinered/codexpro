@@ -70,7 +70,8 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
     const result = (value: Extract<ProviderEvent, { type: "session.prompt_result" }>["result"]) =>
       emit({ type: "session.prompt_result", sessionId, clientMessageId: prompt.clientMessageId, result: value });
     if (prompt.input.type !== "message") return result({ type: "failed", error: { message: "Только текст" } });
-    // #учебно-не-боевое-12 — один ход за раз, без steer; из сообщения берётся только текст, вложения молча отбрасываются.
+    // #учебно-не-боевое-12 — один ход за раз, без steer; берутся только части type "text" (введённый текст и текстовые
+    // вложения), остальные вложения молча отбрасываются.
     // В бою — очередь сессии, передача вложений или явный отказ на входе.
     if (session.active) {
       return result({ type: "failed", error: { message: "Предыдущая задача ещё ждёт ответа ChatGPT" } });

@@ -26,11 +26,19 @@ const MARK = new RegExp(`${TAG}-(\\d{2,})(?!\\d)`, "g");
 const catalog = readFileSync(join(ROOT, CATALOG), "utf8");
 
 // Разделы каталога: «### NN. Заголовок» и абзац «**Где:** `путь`, `путь`» (может переноситься на следующие строки).
+// Снятый раздел — «### NN. (снято) …»: номер занят навсегда, меток на него быть не должно.
 const sections = [...catalog.matchAll(/^### (\d{2,})\. (.+)$/gm)].map((m, i, all) => {
   const body = catalog.slice(m.index, all[i + 1]?.index ?? catalog.length);
   const where = /^\*\*Где:\*\* ([\s\S]*?)(?:\n\s*\n|(?![\s\S]))/m.exec(body)?.[1] ?? ""; // до пустой строки или конца
-  return { id: m[1], heading: `${m[1]}. ${m[2]}`, where: [...where.matchAll(/`([^`]+)`/g)].map((w) => w[1]).sort() };
+  return {
+    id: m[1],
+    heading: `${m[1]}. ${m[2]}`,
+    retired: m[2].startsWith("(снято)"),
+    where: [...where.matchAll(/`([^`]+)`/g)].map((w) => w[1]).sort(),
+  };
 });
+const active = sections.filter((s) => !s.retired);
+const byNumber = (a, b) => Number(a) - Number(b);
 
 // Метки в файлах рабочей копии, кроме каталога и самого скрипта: номер → файлы.
 // пути ls-files — от каталога запуска, поэтому запуск из корня
@@ -56,27 +64,31 @@ test("номера разделов не повторяются и идут бе
   const ids = sections.map((s) => s.id);
   assert.equal(new Set(ids).size, ids.length, `номера повторяются: ${ids.join(", ")}`);
   assert.deepEqual(
-    [...ids].sort(),
+    [...ids].sort(byNumber),
     ids.map((_, i) => String(i + 1).padStart(2, "0")),
   );
 });
 
-test("у каждого раздела есть строка «Где» и хотя бы одна метка в репозитории", () => {
-  for (const s of sections) {
+test("у каждого действующего раздела есть строка «Где» и хотя бы одна метка в репозитории", () => {
+  for (const s of active) {
     assert.ok(s.where.length, `${s.id}: нет строки **Где:**`);
     assert.ok(marks.has(s.id), `«${s.heading}»: метки ${TAG}-${s.id} нет ни в одном файле`);
   }
 });
 
 test("«Где» совпадает с файлами, в которых стоит метка", () => {
-  for (const s of sections) {
+  for (const s of active) {
     assert.deepEqual([...(marks.get(s.id) ?? [])].sort(), s.where, `«${s.heading}»`);
   }
 });
 
-test("метки ссылаются только на существующие разделы", () => {
-  const known = new Set(sections.map((s) => s.id));
-  for (const [id, where] of marks) assert.ok(known.has(id), `${TAG}-${id} в ${[...where].join(", ")}: такого раздела нет`);
+test("метки ссылаются только на существующие и не снятые разделы", () => {
+  const known = new Set(active.map((s) => s.id));
+  const retired = new Set(sections.filter((s) => s.retired).map((s) => s.id));
+  for (const [id, where] of marks) {
+    const why = retired.has(id) ? "раздел снят — уберите метку" : "такого раздела нет";
+    assert.ok(known.has(id), `${TAG}-${id} в ${[...where].join(", ")}: ${why}`);
+  }
 });
 
 test("в коде метка всегда с номером", () => {
@@ -90,14 +102,20 @@ const github = (heading) =>
 const gitlab = (heading) => github(heading).replace(/-{2,}/g, "-");
 
 test("якорь каждого раздела одинаков на GitHub и GitLab", () => {
-  for (const s of sections) assert.equal(github(s.heading), gitlab(s.heading), `«${s.heading}»: уберите « — » или «--»`);
+  for (const s of sections) {
+    assert.equal(
+      github(s.heading),
+      gitlab(s.heading),
+      `«${s.heading}»: на GitHub якорь ${github(s.heading)}, на GitLab ${gitlab(s.heading)} — уберите знак препинания между пробелами (« — », « → », « / ») или двойной пробел`,
+    );
+  }
 });
 
 test("сводная таблица: по строке на раздел, по порядку номеров, ссылка — на свой раздел", () => {
   const rows = [...catalog.matchAll(/^\| \[(\d{2,})\]\(#([^)]+)\) \|/gm)].map((m) => ({ id: m[1], link: m[2] }));
   assert.deepEqual(
     rows.map((r) => r.id),
-    sections.map((s) => s.id).sort(),
+    sections.map((s) => s.id).sort(byNumber),
   );
   for (const r of rows) {
     const s = sections.find((x) => x.id === r.id);
