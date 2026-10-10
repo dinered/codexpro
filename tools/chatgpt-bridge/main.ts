@@ -51,12 +51,18 @@ async function foreignNow(): Promise<unknown> {
 
 // #внимание-учебно-аналитический-предохранитель — лимит сообщений за запуск: по умолчанию DEFAULT_LIMIT, больше — только
 // явным --limit, не больше MAX_LIMIT (ядро моста проверяет то же).
+const USAGE = `использование: node main.ts [каталог .ai-bridge/paseo] [--limit N], N от 1 до ${MAX_LIMIT}, по умолчанию ${DEFAULT_LIMIT}`;
 const options = { limit: { type: "string", default: String(DEFAULT_LIMIT) } } as const;
-const { values, positionals } = parseArgs({ allowPositionals: true, options });
+// опечатка в ключе (--limt) или --limit без числа — тоже отказ с записью в журнал, а не стек Node
+const { values, positionals } = (() => {
+  try {
+    return parseArgs({ allowPositionals: true, options });
+  } catch (error) {
+    return fail(`${error instanceof Error ? error.message : error}; ${USAGE}`);
+  }
+})();
 const limit = Number(values.limit);
-if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT || positionals.length > 1) {
-  fail(`использование: node main.ts [каталог .ai-bridge/paseo] [--limit N], N от 1 до ${MAX_LIMIT}, по умолчанию ${DEFAULT_LIMIT}`);
-}
+if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT || positionals.length > 1) fail(USAGE);
 const root = positionals[0] ?? join(WORK, "sandbox/.ai-bridge/paseo");
 
 // Остановка оператором (cli.ts, stopSignalAction): Ctrl+C, SIGTERM и закрытое окно терминала (SIGHUP).
@@ -106,7 +112,6 @@ try {
   const pages = browser.contexts().flatMap((c) => c.pages()).filter((p) => p.url().startsWith("https://chatgpt.com/"));
   // #внимание-учебно-аналитический-предохранитель — ровно одна вкладка chatgpt.com: мост не выбирает чат сам
   if (pages.length !== 1) throw new FatalError(`нужна ровно одна вкладка chatgpt.com, открыто: ${pages.length}`);
-  console.log("Ctrl+C — остановить мост");
   await runBridge({ page: pages[0], root, limit, log, signal: abort.signal });
   log("мост остановлен");
 } catch (error) {

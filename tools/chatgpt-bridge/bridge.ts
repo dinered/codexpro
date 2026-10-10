@@ -101,7 +101,9 @@ export async function runBridge({
   const token = ownerToken();
   const lock = join(root, BRIDGE_LOCK);
   // #внимание-учебно-аналитический-предохранитель — один мост на каталог задач: второй не стартует
-  if (!(await acquire(lock, token, leaseMs))) throw new FatalError("другой мост уже работает");
+  if (!(await acquire(lock, token, leaseMs))) {
+    throw new FatalError(`другой мост уже работает — или прошлый упал меньше ${leaseMs / 1000} с назад: подождите и запустите снова`);
+  }
 
   const url = page.url();
   const composer = page.locator(SEL.composer);
@@ -132,7 +134,7 @@ export async function runBridge({
     return true;
   }
 
-  // Задачи без ответа, старые первыми: живые (плагин их пульсирует) или, при live = false, все.
+  // Живые задачи без ответа (плагин их пульсирует), старые первыми; при live = false — все задачи, даже с ответом.
   // #внимание-учебно-аналитический-предохранитель — ссылки (на папки и файлы) пропускаются: их мог подложить ChatGPT.
   async function pending(live = true) {
     const tasks: Task[] = [];
@@ -143,7 +145,8 @@ export async function runBridge({
       for (const name of names) {
         const parsed = parseName(name);
         if (parsed?.kind !== "task" || sentIds.has(parsed.id)) continue;
-        if (names.includes(fileName("reply", parsed.id)) || names.includes(fileName("error", parsed.id))) continue;
+        const answered = names.includes(fileName("reply", parsed.id)) || names.includes(fileName("error", parsed.id));
+        if (live && answered) continue;
         const info = await lstat(join(dir, name)).catch(() => null);
         if (info?.isFile() && (!live || (await isFresh(join(dir, name), leaseMs)))) {
           tasks.push({ session: entry.name, id: parsed.id, dir, born: info.birthtimeMs || info.mtimeMs });
@@ -291,12 +294,12 @@ export async function runBridge({
 
   try {
     if (!CHAT_URL.test(url)) throw new FatalError("вкладка ChatGPT должна быть открыта в существующем чате (https://chatgpt.com/c/…)");
-    // #модельный-учебно-аналитический-контроль — действующие лимит и пауза в журнале: их сверяет чек-лист живого прогона
-    log(`мост: ${root} → чат ${new URL(url).pathname}, не больше ${limit} сообщений за запуск, пауза ${pauseMs / 1000} с`);
     if (!acceptQueued) {
       // #внимание-учебно-аналитический-предохранитель — очередь при запуске пуста: в ChatGPT уходит только то, что оператор отправил при
-      // работающем мосте, а не забытый ход из прошлого (проверка Paseo через CLI, упавший тест или мост)
-      const live = await pending();
+      // работающем мосте, а не забытый ход из прошлого (проверка Paseo через CLI, упавший тест или мост). Сначала снимок всех ходов,
+      // даже без пульса (плагин стоял) или с ответом: такой оживёт позже — в ChatGPT не уйдёт. Ход, пришедший после снимка, — новый.
+      for (const task of await pending(false)) queuedAtStart.add(task.id);
+      const live = (await pending()).filter((task) => queuedAtStart.has(task.id));
       if (live.length) {
         const names = live.map((task) => `${task.session}/${task.id}`).join(", ");
         const claimed = await Promise.all(live.map((task) => lstat(fileOf(task, "claim")).then(() => true, () => false)));
@@ -304,9 +307,10 @@ export async function runBridge({
         const warning = claimed.includes(true) ? "; мост упал во время хода — сообщение могло уже уйти в ChatGPT: проверьте чат" : "";
         throw new FatalError(`в очереди уже есть задачи (${names}): отмените их в Paseo («Стоп») и запустите мост заново${warning}`);
       }
-      // ход без пульса (плагин стоял) тоже из прошлого: оживёт позже — в ChatGPT не уйдёт
-      for (const task of await pending(false)) queuedAtStart.add(task.id);
     }
+    // #модельный-учебно-аналитический-контроль — действующие лимит и пауза в журнале: их сверяет чек-лист живого прогона.
+    // Строка — после проверок: с неё оператор отправляет сообщения.
+    log(`мост запущен: ${root} → чат ${new URL(url).pathname}, не больше ${limit} сообщений за запуск, пауза ${pauseMs / 1000} с; остановить — Ctrl+C`);
     while (sent < limit && !signal?.aborted) {
       await beat();
       // #внимание-учебно-аналитический-предохранитель — пауза ждётся до захвата задачи: захват за время паузы не протухнет

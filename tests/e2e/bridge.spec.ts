@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -27,6 +27,8 @@ const enters = (page: Page): Promise<number> => page.evaluate(() => (window as a
 const read = (path: string) => readFile(path, "utf8");
 const newRoot = () => mkdtemp(join(tmpdir(), "chatgpt-bridge-"));
 const age = (path: string, ms: number) => utimes(path, new Date(Date.now() - ms), new Date(Date.now() - ms));
+// Для проверок отказа: сломанная защита не повесит тест до таймаута — мост вернёт { sent } за 5 с, проверка FatalError упадёт сразу.
+const cutoff = () => AbortSignal.timeout(5_000);
 
 type Task = Record<Kind, string>; // пути task-, claim-, reply-, error- одного id
 
@@ -39,6 +41,16 @@ async function task(root: string, session: string, text: string): Promise<Task> 
   await mkdir(dir, { recursive: true });
   await writeAtomic(t.task, text);
   return t;
+}
+
+// То же синхронно — из обратного вызова журнала, ровно в момент строки (мост ждёт, пока вызов не вернётся).
+function taskNow(root: string, session: string, text: string): Task {
+  const dir = join(root, session);
+  const id = newTaskId();
+  const path = (kind: Kind) => join(dir, fileName(kind, id));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path("task"), text);
+  return { task: path("task"), claim: path("claim"), reply: path("reply"), error: path("error") };
 }
 
 // Мост закончил с задачей: ответ или ошибка на месте, захват снят.
@@ -110,7 +122,7 @@ test(`лимит вне 1..${MAX_LIMIT} — мост не стартует пр�
   const a = await task(root, "s1", "задача");
 
   for (const limit of [0, MAX_LIMIT + 1, 1.5, Number.NaN]) {
-    expect(await runBridge({ page, root, ...fast, limit }).catch((e) => e), String(limit)).toBeInstanceOf(FatalError);
+    expect(await runBridge({ page, root, ...fast, limit, signal: cutoff() }).catch((e) => e), String(limit)).toBeInstanceOf(FatalError);
   }
   expect(await sent(page)).toEqual([]);
   for (const path of [a.claim, a.reply, a.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
@@ -256,7 +268,7 @@ test("ссылки вместо файла задачи, папки сессии
 
   const rootLink = `${root}-link`;
   await symlink(root, rootLink);
-  expect(await runBridge({ page, root: rootLink, ...fast }).catch((e) => e)).toBeInstanceOf(FatalError);
+  expect(await runBridge({ page, root: rootLink, ...fast, signal: cutoff() }).catch((e) => e)).toBeInstanceOf(FatalError);
 });
 
 test("пустая задача — error-<id>.md, в чат ничего не уходит", async ({ page }) => {
@@ -281,7 +293,7 @@ for (const [why, query, draft] of [
     const root = await newRoot();
     const a = await task(root, "s1", "задача");
 
-    expect(await runBridge({ page, root, ...fast }).catch((e) => e)).toBeInstanceOf(FatalError);
+    expect(await runBridge({ page, root, ...fast, signal: cutoff() }).catch((e) => e)).toBeInstanceOf(FatalError);
 
     expect(await sent(page)).toEqual([]);
     expect(await page.locator(SEL.composer).innerText()).toBe(draft);
@@ -351,7 +363,7 @@ test("второй мост на том же корне не запускает�
   const first = start(page, root);
   await expect.poll(() => existsSync(lock)).toBe(true);
 
-  const error = await runBridge({ page, root, ...fast }).catch((e) => e);
+  const error = await runBridge({ page, root, ...fast, signal: cutoff() }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("другой мост уже работает");
 
@@ -378,7 +390,7 @@ test("замок упавшего моста (без пульса) перехв�
 test("мост привязан к открытому чату: не /c/<id> — не стартует, вкладку увели в другой чат — FatalError", async ({ page, context }) => {
   const root = await newRoot();
   const blank = await context.newPage();
-  expect(await runBridge({ page: blank, root, ...fast }).catch((e) => e)).toBeInstanceOf(FatalError);
+  expect(await runBridge({ page: blank, root, ...fast, signal: cutoff() }).catch((e) => e)).toBeInstanceOf(FatalError);
 
   await openChat(page);
   const a = await task(root, "s1", "задача");
@@ -412,7 +424,7 @@ test("очередь при запуске не пуста — мост не с�
   const root = await newRoot();
   const old = await task(root, "s1", "забытый ход");
 
-  const error = await runBridge({ page, root, ...fast, acceptQueued: undefined, limit: 1 }).catch((e) => e);
+  const error = await runBridge({ page, root, ...fast, acceptQueued: undefined, limit: 1, signal: cutoff() }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("в очереди уже есть задачи");
   expect(error.message).not.toContain("могло уже уйти");
@@ -427,7 +439,7 @@ test("перезапуск после падения моста посреди �
   await writeFile(orphan.claim, "упавший мост");
   await age(orphan.claim, LEASE_MS + 5_000);
 
-  const error = await runBridge({ page, root, ...fast, acceptQueued: undefined, limit: 1 }).catch((e) => e);
+  const error = await runBridge({ page, root, ...fast, acceptQueued: undefined, limit: 1, signal: cutoff() }).catch((e) => e);
   expect(error).toBeInstanceOf(FatalError);
   expect(error.message).toContain("в очереди уже есть задачи");
   expect(error.message).toContain("сообщение могло уже уйти в ChatGPT");
@@ -436,23 +448,43 @@ test("перезапуск после падения моста посреди �
   for (const path of [orphan.reply, orphan.error, join(root, BRIDGE_LOCK)]) expect(existsSync(path), path).toBe(false);
 });
 
-test("ход без пульса при запуске, оживший позже, в ChatGPT не уходит — error-<id>.md", async ({ page }) => {
+test("ход из прошлого, при запуске без пульса или с пустым ответом, позже в ChatGPT не уходит — error-<id>.md", async ({ page }) => {
   await openChat(page, "?ms=1");
   const root = await newRoot();
   const old = await task(root, "s1", "забытый ход");
   await age(old.task, LEASE_MS + 5_000); // плагин стоял (docker pause): проверку очереди ход проходит
+  const hidden = await task(root, "s3", "ход с пустым ответом");
+  await writeFile(hidden.reply, ""); // пустой ответ плагин не принимает и пульсирует ход дальше
 
-  const bridge = start(page, root, { acceptQueued: undefined });
-  await expect.poll(() => existsSync(join(root, BRIDGE_LOCK))).toBe(true);
-  await page.waitForTimeout(1_000); // проверка очереди позади: она идёт сразу после захвата замка
+  const lines: string[] = [];
+  const bridge = start(page, root, { acceptQueued: undefined, log: (line) => lines.push(line) });
+  await expect.poll(() => lines.some((line) => line.startsWith("мост запущен"))).toBe(true); // проверка очереди позади
   await utimes(old.task, new Date(), new Date()); // плагин ожил
+  await rm(hidden.reply);
   const live = await task(root, "s2", "новый ход");
-  await handled(old);
-  await handled(live);
+  for (const t of [old, hidden, live]) await handled(t);
   expect(await bridge.stop()).toEqual({ sent: 1 });
   expect(await sent(page)).toEqual(["новый ход"]);
-  expect(await read(old.error)).toContain("ход ждал до запуска моста");
-  expect(existsSync(old.reply)).toBe(false);
+  for (const t of [old, hidden]) {
+    expect(await read(t.error)).toContain("ход ждал до запуска моста");
+    expect(existsSync(t.reply)).toBe(false);
+  }
+});
+
+test("ход, отправленный сразу после строки «мост запущен», уходит штатно", async ({ page }) => {
+  await openChat(page, "?ms=1");
+  const root = await newRoot();
+  let a: Task | undefined;
+  // оператор отправляет сообщение ровно в момент строки: снимок очереди при запуске уже позади
+  const log = (line: string) => {
+    if (line.startsWith("мост запущен")) a = taskNow(root, "s1", "сразу после запуска");
+  };
+  const bridge = start(page, root, { acceptQueued: undefined, log });
+  await expect.poll(() => a).toBeDefined();
+  // мост взял ход, а не отказал при запуске («в очереди уже есть задачи»)
+  expect(await Promise.race([bridge.run.catch((e) => e), handled(a!).then(() => "взят")])).toBe("взят");
+  expect(await bridge.stop()).toEqual({ sent: 1 });
+  expect(await read(a!.reply)).toContain("Эхо: сразу после запуска");
 });
 
 test("значения договорённости: пауза 20 с, лимит по умолчанию 20, не больше 500", async ({ page }) => {
@@ -503,20 +535,23 @@ test("проверка Chrome: только профиль песочницы с
     `${ok} --proxy-pac-url=http://127.0.0.1/proxy.pac`,
     `${ok} --proxy-auto-detect`,
     `${ok} --proxy-bypass-list=*`,
+    ok.replace(CHROME_PROXY, `-${CHROME_PROXY}`), // «---proxy-server» для Chrome — другой, неизвестный ключ
+    `${ok.replace(CHROME_PROXY, "")} -- ${CHROME_PROXY}`, // после «--» у Chrome не ключи, а адреса
   ]) {
     expect(chromeVerdict([bad], profile), bad).toMatch(/не тот Chrome/);
   }
+  expect(chromeVerdict([ok.replace(CHROME_PROXY, CHROME_PROXY.slice(1))], profile)).toBeNull(); // «-ключ» Chrome принимает как «--ключ»
 });
 
 test("проверка контейнеров: неостановленный codexpro-sandbox или сбой docker — отказ; остальные живые называются", () => {
   const exit1 = new Error("Command failed: exit 1");
   expect(containersVerdict(null, "paseo-sandbox\trunning\ncodexpro-sandbox\texited\n", "")).toEqual({ refusal: null, running: ["paseo-sandbox"] });
   expect(containersVerdict(null, "", "")).toEqual({ refusal: null, running: [] });
-  expect(containersVerdict(null, "a\tcreated\nb\tdead\nsearxng\tpaused\nc\trestarting\n", "")).toEqual({
+  expect(containersVerdict(null, "a\tcreated\nb\tdead\nr\tremoving\nsearxng\tpaused\nc\trestarting\n", "")).toEqual({
     refusal: null,
     running: ["searxng (paused)", "c (restarting)"], // на паузе процессы живы: после unpause снова видят CDP
   });
-  for (const state of ["running", "paused", "restarting", "removing"]) {
+  for (const state of ["running", "paused", "restarting"]) {
     expect(containersVerdict(null, `codexpro-sandbox\t${state}\nsearxng\trunning\n`, "").refusal, state).toMatch(/codexpro-sandbox не остановлен/);
   }
   for (const [error, stderr] of [

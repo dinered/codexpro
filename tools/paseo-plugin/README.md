@@ -70,12 +70,13 @@
    connection»: адрес `127.0.0.1`, порт `6790`, пароль — Cmd+V.
 3. «New workspace» → папка `workspace` → выбор модели → провайдер
    «ChatGPT (CodexPro)» → модель `chatgpt`.
-4. Сообщение в поле «Message the agent» → отправить.
+4. Если отвечать будет мост — сначала запустите его (`tools/chatgpt-bridge/README.md`,
+   «Запуск»): при непустой очереди он не стартует.
+5. Сообщение в поле «Message the agent» → отправить.
 
 Кто отвечает:
 
-- мост — `tools/chatgpt-bridge/README.md`; запускать до первого сообщения
-  агенту: при непустой очереди мост не стартует;
+- мост — `tools/chatgpt-bridge/README.md`;
 - ChatGPT с CodexPro по подсказке в чате Paseo — только в браузере или профиле
   без CDP, не в Chrome моста (`tools/codexpro-sandbox/README.md`);
 - вручную — ID взять из имени файла задачи:

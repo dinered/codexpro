@@ -10,10 +10,13 @@ const PROXY_BYPASS = ["--no-proxy-server", "--proxy-pac-url", "--proxy-auto-dete
 export function chromeVerdict(commands: string[], profile: string): string | null {
   if (!commands.length) return "нет Chrome с отладкой на 127.0.0.1:9222 (tools/codexpro-sandbox/README.md, «Chrome для ChatGPT»)";
   const wanted = [`--user-data-dir=${profile}`, CHROME_PROXY];
-  // Флаги — целыми словами (Chrome на macOS принимает и «-флаг»): подстрока пропустила бы чужой профиль «profile-old»
-  // и прокси с откатом напрямую «…:17891,direct://». Каждый нужный флаг — ровно один раз: из двух Chrome берёт последний.
+  // Флаги — целыми словами и так, как их разбирает сам Chrome (base::CommandLine): префикс «--» или «-», после слова
+  // «--» флагов нет. Подстрока пропустила бы чужой профиль «profile-old» и прокси с откатом напрямую «…:17891,direct://».
+  // Каждый нужный флаг — ровно один раз: из двух Chrome берёт последний.
   const fits = (command: string) => {
-    const flags = command.split(/\s+/).filter((word) => word.startsWith("-")).map((word) => word.replace(/^-+/, "--"));
+    const words = command.split(/\s+/);
+    const end = words.indexOf("--");
+    const flags = (end < 0 ? words : words.slice(0, end)).filter((word) => word.startsWith("-")).map((word) => `--${word.replace(/^--?/, "")}`);
     const named = (name: string) => flags.filter((flag) => flag === name || flag.startsWith(`${name}=`));
     return wanted.every((flag) => named(flag.split("=")[0]).join(" ") === flag) && PROXY_BYPASS.every((name) => !named(name).length);
   };
@@ -26,9 +29,10 @@ export function chromeVerdict(commands: string[], profile: string): string | nul
 // docker не ответил — отказ. Остальные живые контейнеры тоже видят CDP: их мост не запрещает, а называет в журнале
 // (чек-лист живого прогона — остановить или принять риск явно).
 // Вход — ответ `docker --context orbstack ps -a --format '{{.Names}}\t{{.State}}'`.
-// Остановлен — только created, exited, dead: на паузе (paused) и при перезапуске (restarting) процессы контейнера живы,
-// Docker и тогда считает его Running; после `docker unpause` туннель и коннектор снова работают.
-const STOPPED = ["created", "exited", "dead"];
+// Остановлен — created, exited, dead и removing (удаляется уже остановленный). Не остановлен и paused: процессы заморожены,
+// но живы, и после `docker unpause` туннель и коннектор снова работают; и restarting: процесс вышел, но Docker сейчас
+// запустит контейнер снова. В обоих случаях Docker считает контейнер Running.
+const STOPPED = ["created", "exited", "dead", "removing"];
 export function containersVerdict(error: Error | null, stdout: string, stderr: string): { refusal: string | null; running: string[] } {
   if (error) {
     const why = stderr.trim() || error.message;
