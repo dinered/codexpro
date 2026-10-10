@@ -11,14 +11,19 @@ export function chromeVerdict(commands: string[], profile: string): string | nul
   if (!commands.length) return "нет Chrome с отладкой на 127.0.0.1:9222 (tools/codexpro-sandbox/README.md, «Chrome для ChatGPT»)";
   const wanted = [`--user-data-dir=${profile}`, CHROME_PROXY];
   // Флаги — целыми словами и так, как их разбирает сам Chrome (base::CommandLine): префикс «--» или «-», после слова
-  // «--» флагов нет. Подстрока пропустила бы чужой профиль «profile-old» и прокси с откатом напрямую «…:17891,direct://».
-  // Каждый нужный флаг — ровно один раз: из двух Chrome берёт последний.
+  // «--» ключей нет. Подстрока пропустила бы чужой профиль «profile-old» и прокси с откатом напрямую «…:17891,direct://».
+  // Но ps склеивает argv через пробел без кавычек, и «--» в его выводе может быть частью значения. Поэтому неоднозначное —
+  // в сторону отказа: нужные флаги — до первого «--» и ровно по одному во всей строке (из двух Chrome берёт последний),
+  // флагов в обход прокси нет нигде.
   const fits = (command: string) => {
     const words = command.split(/\s+/);
     const end = words.indexOf("--");
-    const flags = (end < 0 ? words : words.slice(0, end)).filter((word) => word.startsWith("-")).map((word) => `--${word.replace(/^--?/, "")}`);
-    const named = (name: string) => flags.filter((flag) => flag === name || flag.startsWith(`${name}=`));
-    return wanted.every((flag) => named(flag.split("=")[0]).join(" ") === flag) && PROXY_BYPASS.every((name) => !named(name).length);
+    const flags = (list: string[]) => list.filter((word) => word.startsWith("-")).map((word) => `--${word.replace(/^--?/, "")}`);
+    const all = flags(words);
+    const head = flags(end < 0 ? words : words.slice(0, end));
+    const named = (list: string[], name: string) => list.filter((flag) => flag === name || flag.startsWith(`${name}=`));
+    const once = (flag: string) => named(head, flag.split("=")[0]).join(" ") === flag && named(all, flag.split("=")[0]).length === 1;
+    return wanted.every(once) && PROXY_BYPASS.every((name) => !named(all, name).length);
   };
   if (commands.every(fits)) return null;
   return `на 127.0.0.1:9222 не тот Chrome: нужны ${wanted.join(" и ")}, по одному разу и без флагов в обход прокси — мост не подключаю`;

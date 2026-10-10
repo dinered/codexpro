@@ -537,6 +537,10 @@ test("проверка Chrome: только профиль песочницы с
     `${ok} --proxy-bypass-list=*`,
     ok.replace(CHROME_PROXY, `-${CHROME_PROXY}`), // «---proxy-server» для Chrome — другой, неизвестный ключ
     `${ok.replace(CHROME_PROXY, "")} -- ${CHROME_PROXY}`, // после «--» у Chrome не ключи, а адреса
+    // ps теряет границы argv: «--» может быть внутри значения ("--window-name=ChatGPT -- мост"), и тогда хвост — ключи
+    `${ok} --window-name=ChatGPT -- мост --no-proxy-server`,
+    `${ok} --window-name=ChatGPT -- мост --proxy-server=direct://`,
+    `${ok} --window-name=ChatGPT -- мост --user-data-dir=/Users/u/other`,
   ]) {
     expect(chromeVerdict([bad], profile), bad).toMatch(/не тот Chrome/);
   }
