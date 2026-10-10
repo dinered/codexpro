@@ -2,8 +2,26 @@ workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "merge_train_event"
+    # ai/codexpro#4: синхронизация main с GitHub — по расписанию, при push в main и вручную (Run pipeline)
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE =~ /^(schedule|push|web)$/
 smoke:
   stage: test
   tags: [merge-train-smoke]
+  rules:
+    - if: $CI_PIPELINE_SOURCE =~ /^merge_(request|train)_event$/
   script:
     - echo smoke ok
+# main ⇄ GitHub dinered/codexpro, только fast-forward — docs/github-sync.md. Без обоих токенов задания нет.
+sync-github:
+  stage: deploy
+  tags: [$SYNC_RUNNER_TAG]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE =~ /^(schedule|push|web)$/ && $GITHUB_SYNC_TOKEN && $GITLAB_SYNC_TOKEN
+  resource_group: sync-github # запуски по расписанию и по push не пересекаются
+  variables:
+    SYNC_RUNNER_TAG: merge-train-smoke # другой раннер — CI-переменная проекта с тем же именем
+    GITLAB_REPO_URL: $CI_SERVER_URL/$CI_PROJECT_PATH.git
+    GITHUB_REPO_URL: https://github.com/dinered/codexpro.git
+    SYNC_NOTE_ISSUE: "4"
+  script:
+    - sh tools/sync-github/sync.sh
