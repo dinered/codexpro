@@ -49,7 +49,9 @@ curl — через конфиг на stdin, поэтому в командно�
    tokens → Fine-grained tokens → Generate new token.
    - Token name: `gitlab-sync-codexpro`; Expiration: Custom — `2027-10-01` (эта
      дата записана в `AGENTS.md`).
-   - Repository access: Only select repositories → `dinered/codexpro`.
+   - Repository access: All repositories — один токен на все репозитории
+     (решение оператора, нота в Issue #4; утечка даёт запись во все репозитории
+     `dinered`).
    - Permissions → Repository permissions → Contents: Read and write (Metadata:
      Read-only GitHub добавит сам).
 
@@ -126,6 +128,8 @@ fast-forward.
 - Правки с GitHub приходят в `main` GitLab мимо MR, merge train и ревью — так
   решил оператор (нота 6773 в Issue #4).
 - Токен GitLab с ролью Maintainer: его утечка даёт права мейнтейнера проекта.
+- PAT GitHub выдан на все репозитории `dinered` (решение оператора): его утечка
+  с раннера даёт запись во все из них, а не только в `dinered/codexpro`.
 - Раннер `vm124-shell` общий и выполняет задания shell-ом: пока идёт
   синхронизация, токены в окружении процесса доступны другим заданиям на нём под
   тем же пользователем. Для изоляции — отдельный раннер (`SYNC_RUNNER_TAG`).
