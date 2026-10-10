@@ -59,7 +59,8 @@ curl — через конфиг на stdin, поэтому в командно�
    имя `sync-github`, роль Maintainer, scopes `write_repository` и `api` (`api` —
    для заметки о расхождении), срок не больше года.
 
-   Защита `main` сейчас: Allowed to push and merge — No one. Чтобы задание могло
+   Защита `main` сейчас: Allowed to merge — Maintainers, Allowed to push and
+   merge — No one; меняется только второе поле. Чтобы задание могло
    приносить в `main` правки с GitHub: Settings → Repository → Protected branches →
    `main` → Allowed to push and merge — бот этого токена, если ваша редакция
    GitLab даёт выбрать пользователя; иначе Maintainers (тогда пушить в `main`
@@ -85,7 +86,8 @@ curl — через конфиг на stdin, поэтому в командно�
 1. В GitLab — как раньше: ветка задачи, MR, слияние. После слияния push-пайплайн
    отправит `main` на GitHub за несколько минут.
 2. Перед переходом на GitHub последнее задание `sync-github` должно быть зелёным;
-   если сомневаетесь — Run pipeline.
+   если сомневаетесь — Run pipeline. Запустить пайплайн на защищённом `main`
+   может только Maintainer (оператор); агент просит его, а сам не запускает.
 3. На GitHub правки идут прямо в `main`.
 4. Перед возвращением в GitLab — Run pipeline (иначе ждать расписания, до трёх
    часов). После зелёного задания `main` GitLab свежий; новые ветки задач —
@@ -99,16 +101,19 @@ curl — через конфиг на stdin, поэтому в командно�
 Признак: задание `sync-github` красное, в журнале «ветки main разошлись» с SHA
 обеих сторон и общего предка, заметка в Issue #4. Ничего не перезаписано.
 
-Свести вручную, без принудительного push: в клоне задачи GitLab забрать `main` с
-GitHub и слить его в ветку задачи, затем MR:
+Сводит оператор (Maintainer), без принудительного push и без ветки задачи
+(в ветку задачи `main` не вливают — sem-0047). В отдельном клоне GitLab:
 
 ```sh
+git checkout main && git pull --ff-only
 git fetch https://github.com/dinered/codexpro.git main
-git merge FETCH_HEAD
+git merge FETCH_HEAD          # merge-коммит: обе вершины остаются предками
+git push origin main          # без --force; право push в main — шаг 3 настройки
 ```
 
-После слияния MR `main` GitLab содержит обе истории, и следующий запуск отправит
-его на GitHub fast-forward.
+Через MR сводить нельзя: squash или rebase дадут коммитам GitHub новые SHA, и
+расхождение останется. После push следующий запуск отправит `main` на GitHub
+fast-forward.
 
 ## Перевыпуск PAT
 
@@ -124,8 +129,8 @@ git merge FETCH_HEAD
 - Раннер `vm124-shell` общий и выполняет задания shell-ом: пока идёт
   синхронизация, токены в окружении процесса доступны другим заданиям на нём под
   тем же пользователем. Для изоляции — отдельный раннер (`SYNC_RUNNER_TAG`).
-- К `gitlab.home.arpa` токен идёт по http внутри локальной сети, как и весь
-  остальной доступ к этому GitLab.
+- К нашему GitLab токен идёт по http внутри локальной сети, как и весь
+  остальной доступ к нему.
 
 ## Проверка (п. 8 Issue #4)
 
