@@ -1,0 +1,176 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>ChatGPT</title>
+<!-- Имитация ChatGPT для тестов моста. Разметка — по замеру живого чата 2026-10-06 (русский интерфейс), селекторы —
+     SEL в tools/chatgpt-bridge/bridge.ts: поменялась разметка — править и там, и здесь. Тесты подставляют страницу
+     по адресу https://chatgpt.com/c/fake-test (page.route), в сеть ничего не уходит.
+     Enter — пара [data-turn-key]: пузырь с текстом и ответ «Эхо: …» с Markdown-разметкой, по букве раз в ?ms= мс (10);
+     пока ответ идёт, вместо «Отправить» — «Остановить», в конце — панель действий с «Сгенерировать ответ заново».
+     ?think=мс — сначала «Думаю…»; ?pause=мс — пауза посреди ответа, «Остановить» на экране; ?hang — первый ответ
+     не кончается; ?noanswer — первое сообщение принято, ответа нет; ?busy — «Остановить» на экране с самого начала;
+     ?keep=N — в DOM только N последних пар (длинный чат выгружает старые); ?reject — Enter не принимается (лимит, капча);
+     ?error — сообщение принято, «Остановить» видна 1 с, затем вместо ответа ошибка и «Сгенерировать ответ заново»
+     (так ChatGPT показывает сбой).
+     window.sent — отправленные тексты, window.sentAt — время их отправки (мс), window.enters — все нажатия Enter
+     в поле ввода (и непринятые), window.stopped — нажатия «Остановить».
+     #внимание-учебно-аналитический-предохранитель — имитация не ходит в сеть: тесты подставляют её через page.route,
+     а всё, что не адрес имитации, обрывают (route.abort). -->
+<style>
+  [contenteditable] { min-height: 2em; border: 1px solid #999; }
+  [data-user-message-bubble] { white-space: pre-wrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+</style>
+<main></main>
+<form>
+  <button type="button" aria-label="Добавить файлы и другое">+</button>
+  <div data-composer-input>
+    <div class="ProseMirror" contenteditable="true" role="textbox" aria-label="Спросить ChatGPT"></div>
+  </div>
+  <button type="button" aria-label="Выбрать модель ChatGPT">5</button>
+  <button type="button" aria-label="Диктовать">🎙</button>
+  <span></span>
+</form>
+<script>
+  const q = new URLSearchParams(location.search);
+  const ms = Number(q.get("ms") ?? 10);
+  const think = Number(q.get("think") ?? 0);
+  const pause = Number(q.get("pause") ?? 0);
+  const keep = Number(q.get("keep") ?? 0);
+  const main = document.querySelector("main");
+  const form = document.querySelector("form");
+  const box = document.querySelector("[contenteditable]");
+  const slot = form.lastElementChild;
+  const sleep = (t) => new Promise((resolve) => setTimeout(resolve, t));
+  const buttons = (...labels) => labels.map((label) => `<button type="button" aria-label="${label}"></button>`).join("");
+
+  // Ответ: эхо сообщения и всё, что конвертер моста переводит в Markdown (ожидаемый текст — reply() в bridge.spec.ts).
+  // Между тегами без пробелов, как у живого.
+  const REPLY =
+    "<p></p><h3>Итог</h3>" +
+    "<ul><li>первый пункт<ul><li>вложенный пункт</li></ul></li><li>второй с <code>кодом</code></li></ul>" +
+    '<ol start="9"><li>девять<ul><li>под девятью</li></ul></li><li>десять<ul><li>под десятью</li></ul></li></ol>' +
+    "<ul><li><p><strong>Шаг</strong></p><p>Пояснение абзацем.</p></li>" +
+    '<li><p>Шаги:</p><ol start="3"><li>третий</li><li>четвёртый</li></ol></li></ul>' +
+    '<pre><div><span>bash</span><button type="button">Копировать</button></div>' +
+    '<div><code class="language-bash">echo привет\nls -la</code></div></pre>' +
+    "<table><thead><tr><th>Ключ</th><th>Значение</th></tr></thead><tbody><tr><td>a</td><td>1</td></tr></tbody></table>" +
+    "<blockquote><p>цитата</p></blockquote><hr>" +
+    '<p>Ссылка: <a href="https://example.com/">пример</a>, <strong>жирный</strong> и <em>курсив</em>.</p>';
+
+  window.sent = [];
+  window.sentAt = [];
+  window.enters = 0;
+  window.stopped = 0;
+  let generating = q.has("busy");
+  let generation = 0; // конец ответа и «Остановить» меняют номер — идущий ответ это видит и замирает
+  let current = null; // пара, на которую идёт ответ
+
+  // Последняя кнопка формы, как у живого: пусто — голосовой разговор, есть текст — «Отправить», идёт ответ — «Остановить».
+  function render() {
+    const [type, label] = generating
+      ? ["button", "Остановить"]
+      : box.innerText.trim()
+        ? ["submit", "Отправить"]
+        : ["button", "Начать голосовой разговор"];
+    slot.innerHTML = `<button type="${type}" aria-label="${label}">●</button>`;
+  }
+
+  // Конец ответа, сам или по «Остановить»: «Думаю…» и маркер анимации уходят, под ответом — панель действий.
+  function finish() {
+    generation++;
+    generating = false;
+    if (current) {
+      current.querySelectorAll('[data-markdown-text-tone="tertiary"]').forEach((el) => el.remove());
+      current.querySelectorAll("[data-markdown-animated]").forEach((el) => el.removeAttribute("data-markdown-animated"));
+      const actions = buttons("Копировать", "Поделиться", "Прочитать вслух", "Сгенерировать ответ заново", "Ещё действия");
+      current.insertAdjacentHTML("beforeend", `<div>${actions}</div>`);
+      current = null;
+    }
+    render();
+  }
+
+  function send() {
+    const text = box.innerText.trim();
+    if (!text || generating || q.has("reject")) return;
+    box.replaceChildren();
+    window.sent.push(text);
+    window.sentAt.push(Date.now());
+    const turn = document.createElement("div");
+    turn.dataset.turnKey = crypto.randomUUID();
+    turn.innerHTML =
+      "<div data-user-message-bubble></div>" +
+      `<div>${buttons("Скопировать сообщение", "Поделиться промптом", "Редактировать сообщение")}</div>`;
+    turn.firstChild.textContent = text.replaceAll("`", ""); // пузырь рисует Markdown: `код` — без кавычек
+    main.append(turn);
+    if (keep) while (main.children.length > keep) main.firstElementChild.remove();
+    if (q.has("noanswer") && window.sent.length === 1) return render();
+    if (q.has("error")) return fail(turn);
+    respond(turn, text);
+  }
+
+  // Сбой после приёма: «Остановить» на экране, затем текст ошибки (не ответ) и панель с «Сгенерировать ответ заново».
+  // 1 с — с запасом против опроса моста под нагрузкой: пропусти он «Остановить», вышло бы «не начал отвечать».
+  async function fail(turn) {
+    generating = true;
+    current = turn;
+    render();
+    await sleep(1000);
+    turn.insertAdjacentHTML("beforeend", '<div class="text-token-text-error">Что-то пошло не так. Повторите попытку.</div>');
+    finish();
+  }
+
+  async function respond(turn, text) {
+    const gen = ++generation;
+    generating = true;
+    current = turn;
+    render();
+    turn.insertAdjacentHTML("beforeend", '<h4 data-conversation-role="assistant" class="sr-only">ChatGPT сказал:</h4>');
+    if (think) {
+      turn.insertAdjacentHTML(
+        "beforeend",
+        '<div data-markdown-text-style="assistant-message" data-markdown-text-tone="tertiary" data-markdown-animated>Думаю…</div>',
+      );
+      await sleep(think);
+      if (gen !== generation) return;
+    }
+    // маркер анимации здесь на обёртке ответа, у «Думаю…» — на самом блоке: у живого бывает и так, и так
+    turn.insertAdjacentHTML("beforeend", `<div data-markdown-animated><div data-markdown-text-style="assistant-message">${REPLY}</div></div>`);
+    const block = turn.lastChild.firstChild;
+    block.firstChild.textContent = `Эхо: ${text.replaceAll("`", "").replace(/\s+/g, " ")}`;
+    // текст идёт по букве: сначала все текстовые узлы пустые
+    const nodes = [];
+    for (const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT); walk.nextNode(); ) {
+      nodes.push([walk.currentNode, walk.currentNode.data]);
+    }
+    for (const [node] of nodes) node.data = "";
+    const half = Math.floor(nodes.reduce((sum, [, full]) => sum + full.length, 0) / 2);
+    let shown = 0;
+    for (const [node, full] of nodes) {
+      for (let i = 1; i <= full.length; i++) {
+        await sleep(++shown === half && pause ? pause : ms);
+        if (gen !== generation) return;
+        node.data = full.slice(0, i);
+      }
+    }
+    if (q.has("hang") && window.sent.length === 1) return; // «Остановить» так и висит
+    finish();
+  }
+
+  box.addEventListener("input", render);
+  box.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter — перенос строки
+    window.enters++;
+    event.preventDefault();
+    send();
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    send();
+  });
+  form.addEventListener("click", (event) => {
+    if (!event.target.closest('[aria-label="Остановить"]')) return;
+    window.stopped++;
+    finish();
+  });
+  render();
+</script>

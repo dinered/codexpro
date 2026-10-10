@@ -1,0 +1,16 @@
+{
+  "name": "chatgpt-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^5.9.3"
+  }
+}
