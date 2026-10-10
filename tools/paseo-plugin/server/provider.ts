@@ -70,7 +70,8 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
     const result = (value: Extract<ProviderEvent, { type: "session.prompt_result" }>["result"]) =>
       emit({ type: "session.prompt_result", sessionId, clientMessageId: prompt.clientMessageId, result: value });
     if (prompt.input.type !== "message") return result({ type: "failed", error: { message: "Только текст" } });
-    // #учебно-не-боевое-12 — один ход за раз, только текст, без steer; в бою — очередь сессии, вложения, параллельные ходы
+    // #учебно-не-боевое-12 — один ход за раз, без steer; из сообщения берётся только текст, вложения молча отбрасываются.
+    // В бою — очередь сессии, передача вложений или явный отказ на входе.
     if (session.active) {
       return result({ type: "failed", error: { message: "Предыдущая задача ещё ждёт ответа ChatGPT" } });
     }
@@ -92,6 +93,8 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
     let writeError: string | null = null;
     let bridge = false;
     try {
+      // #учебно-не-боевое-13 — каталоги протокола плагин проходит по ссылкам (здесь, в sweep и в rm при закрытии): каталог,
+      // подменённый ChatGPT, уводит запись и удаление за пределы рабочей папки; в бою — разбор пути без ссылок.
       await mkdir(session.dir, { recursive: true });
       // ровно текст сообщения: его отправляет в ChatGPT мост tools/chatgpt-bridge; куда писать ответ — в подсказке ниже
       await writeAtomic(file("task"), text);
@@ -122,6 +125,8 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
     // #учебно-не-боевое-10 — в бою — подписка на очередь или поток ответа API
     let last: string | null = null;
     let pulsed = Date.now();
+    // #учебно-не-боевое-28 — у хода нет срока, захват моста плагин не смотрит: пропавший исполнитель вешает ход до «Стоп»;
+    // в бою — срок хода и видимое истечение аренды исполнителя.
     const tick = async () => {
       let failure: string | null = null;
       let answer: string | null = null;
@@ -146,6 +151,8 @@ function createConnection(capabilities: readonly string[], pollMs: number, pulse
       if (failure !== null) return finishTurn(sessionId, "failed", failure.trim() || "Исполнитель не выполнил задачу");
       if (gone) return finishTurn(sessionId, "failed", "файл задачи удалён");
       // человек или CodexPro пишут ответ не атомарно: берём, когда он не менялся между двумя опросами
+      // #учебно-не-боевое-25 — конец ответа угадывается по паузе в записи: писатель, замерший дольше pollMs, отдаст
+      // обрезанный ответ; в бою — явный признак завершения (rename готового файла, подтверждение в брокере).
       if (answer && answer === last) {
         emit({ type: "timeline.item", sessionId, item: { type: "assistant_message", id: `reply-${turnId}`, text: answer } });
         return finishTurn(sessionId, "completed");

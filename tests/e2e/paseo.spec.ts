@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { runBridge } from "../../tools/chatgpt-bridge/bridge.ts";
 import { BRIDGE_LOCK, fileName, isFresh, parseName, readRegular, tasksRoot } from "../../tools/paseo-plugin/server/protocol.ts";
 
+// #учебно-не-боевое-22 — тест работает на живом стенде оператора: та же папка задач, что у настоящего моста и
+// codexpro-sandbox, путь в коде, ходы и агенты прошлых прогонов остаются; в бою — одноразовое окружение на прогон.
 const ROOT = join(homedir(), "work/ai/codexpro/2");
 const BRIDGE = tasksRoot(join(ROOT, "sandbox"));
 const FAKE = fileURLToPath(new URL("fake-chatgpt.html", import.meta.url));

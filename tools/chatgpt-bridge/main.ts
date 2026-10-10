@@ -1,7 +1,7 @@
 // Запуск моста: node main.ts [каталог .ai-bridge/paseo] [--limit N]. Chrome с ChatGPT — tools/codexpro-sandbox/README.md.
 // Запускает только человек, вручную (Issue #2 п. 6): автозапуска, демона и расписания у моста нет.
-// #учебно-не-боевое-01 — браузер, CDP и прокси нужны только веб-ChatGPT; в бою весь этот файл не нужен
-// (docs/training-vs-production.md).
+// #учебно-не-боевое-01 — браузер и CDP нужны только веб-ChatGPT; в бою этот файл не нужен, а маршрут к API закрепляет
+// инфраструктура (docs/training-vs-production.md).
 import { chromium } from "playwright-core";
 import { execFile } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -22,7 +22,8 @@ const PROFILE = join(WORK, "sandbox-chrome/profile");
 // #модельный-учебно-аналитический-контроль — журнал прогонов вне песочницы. Пишет его сам мост, поэтому журнал
 // переживает закрытое окно терминала; текстов задач и ответов в нём нет. По нему Claude сверяет прогон с чек-листом
 // tools/chatgpt-bridge/README.md («Живой прогон»): проверки, лимит, паузы, сколько отправлено, почему мост остановился.
-// #учебно-не-боевое-20 — журнал — текстовый файл для глаз; в бою — структурные логи, метрики, алерты и аудит.
+// #учебно-не-боевое-20 — журнал — текстовый файл для глаз, дописывается без fsync; в бою — структурные логи, метрики,
+// алерты и аудит.
 const JOURNAL = join(WORK, "bridge-runs.log");
 
 function log(line: string) {
@@ -46,9 +47,9 @@ function run(command: string, args: string[]) {
 }
 
 // #внимание-учебно-аналитический-предохранитель — AGENTS.md: ChatGPT под Playwright только через выход FOREIGN_STRICT
-// (группа FOREIGN в mihomo Clash Verge); что Chrome ходит именно через эту группу — проверка Chrome ниже.
-// #учебно-не-боевое-15 — сеть проверяется один раз при запуске: смену группы во время прогона мост не заметит; в бою
-// маршрут закрепляет сетевая политика, и приложению нечего проверять.
+// (группа FOREIGN в mihomo Clash Verge); что Chrome настроен на вход этой группы (флаг --proxy-server) — проверка Chrome ниже.
+// #учебно-не-боевое-15 — сеть проверяется один раз при запуске, и проверяются настройки, а не маршрут: смену группы во
+// время прогона и обход прокси мимо флага Chrome мост не заметит; в бою маршрут закрепляет сетевая политика.
 async function foreignNow(): Promise<unknown> {
   const response = await new Promise<IncomingMessage>((resolve, reject) =>
     get({ socketPath: MIHOMO, path: "/proxies/FOREIGN" }, resolve).on("error", reject),
@@ -95,6 +96,8 @@ if (now !== "FOREIGN_STRICT") fail(`группа FOREIGN в mihomo стоит н
 const containers = await run("docker", ["--context", "orbstack", "ps", "-a", "--format", "{{.Names}}\t{{.State}}"]);
 const { refusal, running } = containersVerdict(containers.error, containers.stdout, containers.stderr);
 if (refusal) fail(refusal);
+// #учебно-не-боевое-14 — машины OrbStack — разбор табличного вывода orb list, без тестов; сбой или незнакомый вывод
+// отказа не вызывает, только запись в журнал. В бою браузер, если он нужен, — на машине без других жильцов.
 const machines = await run("orb", ["list"]);
 const vms = machines.stdout.split("\n").filter((line) => /\srunning\s/.test(line)).map((line) => line.split(/\s+/)[0]);
 // #модельный-учебно-аналитический-контроль — кто ещё видит CDP этого Chrome: чек-лист требует остановить или принять явно

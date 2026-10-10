@@ -66,6 +66,7 @@ git grep -n "#учебно-не-боевое"
 (cd tools/chatgpt-bridge && npm ci && npm run typecheck)             # типы моста
 (cd tests/e2e && npm ci && npx playwright install chromium && npx playwright test --project bridge)  # мост на имитации
 node --test tools/docs-check/markers.test.mjs                        # каталог и метки
+sh tools/sync-github/sync.test.sh                                    # синхронизация main ⇄ GitHub на локальных репозиториях
 ```
 
 Тест `--project paseo` нужен контейнер `paseo-sandbox`
