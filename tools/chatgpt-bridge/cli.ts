@@ -6,6 +6,7 @@
 // commands — командные строки процессов, слушающих порт (lsof → ps); null — можно подключаться.
 // #учебно-не-боевое-14 — «тот ли Chrome» и «кто рядом» — эвристики по выводу ps и docker при CDP без пароля; в бою
 // браузера нет, а если нужен — изолированная машина, которую задаёт оркестратор.
+// #учебно-не-боевое-19 — порт входа mihomo (17891) и порт CDP (9222) записаны в коде; в бою — конфигурация снаружи.
 export const CHROME_PROXY = "--proxy-server=socks5://127.0.0.1:17891";
 // Флаги, с которыми Chrome ходит мимо --proxy-server, то есть мимо FOREIGN_STRICT.
 const PROXY_BYPASS = ["--no-proxy-server", "--proxy-pac-url", "--proxy-auto-detect", "--proxy-bypass-list"];
