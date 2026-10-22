@@ -2,8 +2,8 @@
 
 Учебный проект: как встроить веб-ChatGPT в Paseo, систему управления
 агентами. Плагин делает ChatGPT в Paseo ещё одним агентом. Ответы ему
-пишет мост, человек или сам ChatGPT через CodexPro. Проект учебный и боевым
-не станет. Код и документация при этом — по высшим отраслевым стандартам
+пишет мост, человек или сам ChatGPT через CodexPro. Проект учебный; «боевое»
+в документации — образец для сравнения, а не план. Код и документация при этом — по высшим отраслевым стандартам
 (`AGENTS.md`): с учениками каждый аспект разбирается как с senior-инженерами.
 
 Заведено `ai-project ensure`. Канон правил и договорённости с оператором —
@@ -66,6 +66,7 @@ git grep -n "#учебно-не-боевое"
 (cd tools/chatgpt-bridge && npm ci && npm run typecheck)             # типы моста
 (cd tests/e2e && npm ci && npx playwright install chromium && npx playwright test --project bridge)  # мост на имитации
 node --test tools/docs-check/markers.test.mjs                        # каталог и метки
+sh tools/sync-github/sync.test.sh                                    # синхронизация main ⇄ GitHub на локальных репозиториях
 ```
 
 Тест `--project paseo` нужен контейнер `paseo-sandbox`
