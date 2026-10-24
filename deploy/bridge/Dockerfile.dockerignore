@@ -1,0 +1,10 @@
+**
+!docs/
+!docs/mydocs/
+!docs/mydocs/z.ai/
+!docs/mydocs/z.ai/download/
+!docs/mydocs/z.ai/download/bridge-reference/
+!docs/mydocs/z.ai/download/bridge-reference/**
+!deploy/
+!deploy/bridge/
+!deploy/bridge/**

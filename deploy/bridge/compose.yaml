@@ -1,0 +1,53 @@
+name: codexpro-reference
+services:
+  browser:
+    image: codexpro-reference:${BRIDGE_IMAGE_TAG:?set exact reviewed revision}
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: deploy/bridge/Dockerfile
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 1280m
+    cpus: 0.8
+    shm_size: 256m
+    security_opt:
+      - seccomp=./seccomp_profile.json
+    ports:
+      - "127.0.0.1:6081:6080"
+    environment:
+      CHROME_START_URL: about:blank
+      CHROME_PROXY_SERVER: ${CHROME_PROXY_SERVER:-}
+    volumes:
+      - profile:/home/node/profile
+    healthcheck:
+      test: ["CMD", "python3", "/opt/bridge/health.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  bridge:
+    image: codexpro-reference:${BRIDGE_IMAGE_TAG:?set exact reviewed revision}
+    platform: linux/amd64
+    profiles: [bridge]
+    network_mode: service:browser
+    depends_on:
+      browser: {condition: service_healthy}
+    init: true
+    restart: "no"
+    stop_grace_period: 30s
+    mem_limit: 256m
+    cpus: 0.2
+    command: ["/opt/bridge/bridge"]
+    volumes:
+      - spool:/data
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  profile:
+  spool:

@@ -1,0 +1,26 @@
+--- a/src/driver/chatgpt.ts
++++ b/src/driver/chatgpt.ts
+@@ -139 +138,0 @@
+-}
+@@ -141,10 +140,11 @@
+-function visibleIn(selector: string): boolean {
+-  return [...document.querySelectorAll(selector)].some((el) => isVisible(el));
+-}
+-
+-/** Видим ли элемент: без display:none/visibility:hidden, с непустой геометрией. */
+-function isVisible(el: Element): boolean {
+-  if ((el as HTMLElement).hidden === true || el.getAttribute("aria-hidden") === "true") return false;
+-  const style = document.defaultView?.getComputedStyle(el);
+-  if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+-  return el.getClientRects().length > 0;
++  function visibleIn(selector: string): boolean {
++    return [...document.querySelectorAll(selector)].some((el) => isVisible(el));
++  }
++
++  /** Видим ли элемент: без display:none/visibility:hidden, с непустой геометрией. */
++  function isVisible(el: Element): boolean {
++    if ((el as HTMLElement).hidden === true || el.getAttribute("aria-hidden") === "true") return false;
++    const style = document.defaultView?.getComputedStyle(el);
++    if (style && (style.display === "none" || style.visibility === "hidden")) return false;
++    return el.getClientRects().length > 0;
++  }
