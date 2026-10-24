@@ -45,7 +45,9 @@ if [[ "$mode" = prepare ]]; then
   "${compose[@]}" build browser
   image_id=$(docker image inspect --format '{{.Id}}' "codexpro-reference:$source_sha")
   printf '%s\n' "$image_id" > "$stage/IMAGE_ID"
-  sha256sum compose.yaml seccomp_profile.json > "$stage/CONFIG.sha256"
+  printf '{"services":{"browser":{"image":"%s"},"bridge":{"image":"%s"}}}\n' "$image_id" "$image_id" > "$stage/image.override.json"
+  "${compose[@]}" -f "$stage/image.override.json" config --format json > "$stage/effective-config.json"
+  sha256sum compose.yaml seccomp_profile.json "$stage/image.override.json" > "$stage/CONFIG.sha256"
   printf '%s\n' "$state_dir" > "$stage/STATE_BIND"
   # Only scoped, non-secret image/config fields are copied to the review packet.
   packet="$stage/review.txt"
@@ -57,6 +59,7 @@ if [[ "$mode" = prepare ]]; then
     sha256sum Dockerfile compose.yaml seccomp_profile.json supervise.py health.py
   } > "$packet"
   docker exec -i -u paseo "$container" sh -c 'cat > /workspace/company/firstmate/data/codexpro-deploy-20261024/sidecar-image-review.txt' < "$packet"
+  docker exec -i -u paseo "$container" sh -c 'cat > /workspace/company/firstmate/data/codexpro-deploy-20261024/sidecar-effective-config.json' < "$stage/effective-config.json"
   cat "$packet"
   printf 'Prepared only; no browser/router restart. After independent image review:\n'
   printf 'bash %q %q start-browser %q\n' "$stage/deploy/bridge/scripts/deploy-sidecars-host.sh" "$source_sha" "$image_id"
@@ -71,6 +74,8 @@ if docker inspect codexpro-reference-browser-1 >/dev/null 2>&1; then
   [[ "$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' codexpro-reference-browser-1)" = codexpro-reference ]] || exit 1
   [[ "$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/home/node/profile"}}{{.Name}}{{end}}{{end}}' codexpro-reference-browser-1)" = codexpro-reference_profile ]] || { echo 'Existing profile volume differs; preserved unchanged.' >&2; exit 1; }
 fi
+compose+=(-f "$stage/image.override.json")
+"${compose[@]}" config --quiet
 "${compose[@]}" up -d --no-deps --no-build --pull never --wait --wait-timeout 60 browser
 [[ "$(docker inspect --format '{{.Image}}' codexpro-reference-browser-1)" = "$expected_image" ]] || exit 1
 [[ "$(docker inspect --format '{{json .HostConfig.PortBindings}}' codexpro-reference-browser-1)" = '{"6080/tcp":[{"HostIp":"192.168.11.241","HostPort":"6081"}]}' ]] || { echo 'Unexpected viewer mapping; inspect before further acceptance.' >&2; exit 1; }
