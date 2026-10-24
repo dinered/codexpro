@@ -22,6 +22,8 @@ home_bind=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/hom
 [[ -n "$home_bind" && "$home_bind" = /* && -d "$home_bind" ]] || { echo 'Live persistent Paseo home bind unavailable.' >&2; exit 1; }
 state_dir="$home_bind/.paseo/codexpro"
 export BRIDGE_IMAGE_TAG="$source_sha" BRIDGE_VIEWER_BIND_IP="$lan_ip" BRIDGE_STATE_HOST_DIR="$state_dir"
+# Direct guest egress was the reviewed route; do not inherit an operator shell proxy.
+export CHROME_PROXY_SERVER=
 base="$HOME/codexpro-reference-pilot"
 mkdir -p "$base"
 stage="$base/source-$source_sha"
@@ -43,6 +45,8 @@ if [[ "$mode" = prepare ]]; then
   "${compose[@]}" build browser
   image_id=$(docker image inspect --format '{{.Id}}' "codexpro-reference:$source_sha")
   printf '%s\n' "$image_id" > "$stage/IMAGE_ID"
+  sha256sum compose.yaml seccomp_profile.json > "$stage/CONFIG.sha256"
+  printf '%s\n' "$state_dir" > "$stage/STATE_BIND"
   # Only scoped, non-secret image/config fields are copied to the review packet.
   packet="$stage/review.txt"
   {
@@ -58,6 +62,8 @@ if [[ "$mode" = prepare ]]; then
   printf 'bash %q %q start-browser %q\n' "$stage/deploy/bridge/scripts/deploy-sidecars-host.sh" "$source_sha" "$image_id"
   exit 0
 fi
+sha256sum --check --status "$stage/CONFIG.sha256" || { echo 'Prepared config/policy changed; startup refused.' >&2; exit 1; }
+[[ "$(cat "$stage/STATE_BIND")" = "$state_dir" ]] || { echo 'Live Paseo home mapping changed; startup refused.' >&2; exit 1; }
 [[ "$(cat "$stage/IMAGE_ID")" = "$expected_image" ]] || { echo 'Recorded reviewed image differs.' >&2; exit 1; }
 [[ "$(docker image inspect --format '{{.Id}}' "codexpro-reference:$source_sha")" = "$expected_image" ]] || { echo 'Image tag moved; startup refused.' >&2; exit 1; }
 # Keep the existing project/profile identity; never stop or delete unrelated containers.
