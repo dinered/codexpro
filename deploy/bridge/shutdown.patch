@@ -1,0 +1,17 @@
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -6 +6 @@
+-import { chromium } from "playwright-core";
++import { chromium, type Browser } from "playwright-core";
+@@ -58,0 +59 @@
++const browserConnection: { current: Browser | null } = { current: null };
+@@ -96,0 +98,7 @@
++} finally {
++  // The bridge owns this CDP connection, while Chrome belongs to the operator.
++  // close() on a CDP-connected Browser disconnects without closing Chrome.
++  await browserConnection.current?.close().catch((error: unknown) => {
++    log.raw(`ошибка отключения от Chrome: ${errorMessage(error)}`);
++    process.exitCode = 1;
++  });
+@@ -105,0 +114 @@
++  browserConnection.current = browser;

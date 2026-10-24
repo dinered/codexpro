@@ -6,6 +6,7 @@ repo=$(CDPATH= cd -- "$here/../.." && pwd)
 app=$(mktemp -d /tmp/codexpro-reference-check-XXXXXX)
 cp -R "$repo/docs/mydocs/z.ai/download/bridge-reference/." "$app/"
 git -C "$app" apply --unidiff-zero "$here/read-page.patch"
+git -C "$app" apply --unidiff-zero "$here/shutdown.patch"
 git -C "$app" apply --unidiff-zero "$here/h1-fixture.patch"
 cd "$app"
 npm ci --ignore-scripts --no-audit --no-fund

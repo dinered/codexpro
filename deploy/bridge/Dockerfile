@@ -19,9 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY docs/mydocs/z.ai/download/bridge-reference/ /app/
-COPY deploy/bridge/read-page.patch /tmp/read-page.patch
+COPY deploy/bridge/read-page.patch deploy/bridge/shutdown.patch /tmp/
 RUN echo 'f3b28c68da9ff452e3180fab0075c4e6b4dff79003091e32b948f348c164e80a  src/driver/chatgpt.ts' | sha256sum -c - \
- && patch --batch --fuzz=0 -p1 < /tmp/read-page.patch && rm /tmp/read-page.patch \
+ && echo 'f7872f5d41d520e45125715a56172b93bdc1386d73767f1cdabfe2915bcd02d6  src/main.ts' | sha256sum -c - \
+ && patch --batch --fuzz=0 -p1 < /tmp/read-page.patch \
+ && patch --batch --fuzz=0 -p1 < /tmp/shutdown.patch \
+ && rm /tmp/read-page.patch /tmp/shutdown.patch \
  && npm ci --ignore-scripts --omit=dev --no-audit --no-fund
 COPY deploy/bridge/supervise.py deploy/bridge/health.py deploy/bridge/bridge /opt/bridge/
 RUN chmod 755 /opt/bridge/bridge \

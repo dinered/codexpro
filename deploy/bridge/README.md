@@ -2,8 +2,9 @@
 
 Candidate configuration; first live start requires First Mate review. Source is
 reference commit `9c556b1833cdad6589c85506605cd2ea4d156882`. The snapshot under
-`docs/mydocs/z.ai/download/bridge-reference` stays unchanged. The only runtime
-overlay makes `readPage` self-contained when Playwright serializes it.
+`docs/mydocs/z.ai/download/bridge-reference` stays unchanged. Runtime overlays make `readPage` self-contained when Playwright serializes
+it and disconnect the bridge-owned CDP connection when the process completes.
+Chrome and its operator tabs remain open independently of bridge shutdown.
 
 ## Processes and access
 
@@ -86,7 +87,11 @@ docker compose --profile bridge stop bridge
 docker compose --profile bridge start bridge
 ```
 
-Reference challenge/login failures stop the bridge. The display/Chrome remain
+A real-Chrome local fixture reproduced hanging processes after operator stop,
+startup error and a synthetic challenge. The shutdown overlay fixes all three:
+the process exits, sends zero messages, and leaves Chrome and its tab alive.
+The meaningful before/after regression is `lifecycle.test.mjs`; all three cases
+pass with the overlay. Reference challenge/login failures stop the bridge. The display/Chrome remain
 available for the operator. A bridge exit must not cause automatic retries or
 new messages; do not change its restart policy to work around this.
 
