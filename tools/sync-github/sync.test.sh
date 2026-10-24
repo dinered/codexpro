@@ -12,7 +12,7 @@ new_case() {
   n=$((n+1)); d=$t/$n; mkdir "$d"
   for side in lab hub work; do git init -q --bare "$d/$side"; done
   tree=$(git --git-dir="$d/work" mktree < /dev/null)
-  race=; race_path=$PATH
+  race=; race_path=$PATH; note_token=; note_issue=
   A=$(mk '' A)
 }
 g() { side=$1; shift; git --git-dir="$d/$side" "$@"; }
@@ -21,7 +21,8 @@ put() { g work push -q "$d/$1" "$3:$2"; }
 refs() { g "$1" for-each-ref --format='%(refname) %(objectname)' refs/heads refs/tags; }
 run() {
   env CI= GITLAB_REPO_URL="file://$d/lab" GITHUB_REPO_URL="file://$d/hub" \
-    GITLAB_SYNC_TOKEN= GITHUB_SYNC_TOKEN= SYNC_NOTE_ISSUE= SYNC_APPLY="${apply:-1}" \
+    GITLAB_SYNC_TOKEN="$note_token" GITHUB_SYNC_TOKEN= SYNC_NOTE_ISSUE="$note_issue" SYNC_APPLY="${apply:-1}" \
+    CI_API_V4_URL= CI_PROJECT_ID= \
     TEST_DIR="$d" TEST_LAB="$d/lab" TEST_HUB="$d/hub" TEST_GIT="$real_git" \
     TEST_ACTION="$race" TEST_A="$A" TEST_B="${B:-}" TEST_C="${C:-}" \
     PATH="${race_path:-$PATH}" sh "$here/sync.sh" > "$d/log" 2>&1
@@ -146,4 +147,14 @@ if CI=true CI_COMMIT_BRANCH=task/topic CI_DEFAULT_BRANCH=main CI_COMMIT_REF_PROT
   GITLAB_REPO_URL="file://$d/lab" GITHUB_REPO_URL="file://$d/hub" \
   sh "$here/sync.sh" > "$d/log" 2>&1; then echo 'FAIL: unprotected CI accepted'; exit 1; fi
 pass 'unprotected CI rejected before reading refs'
+
+new_case
+B=$(mk "$A" B); C=$(mk "$A" C)
+put lab refs/heads/main "$B"; put hub refs/heads/main "$C"
+note_token=nonsecret-fixture; note_issue=4
+bad
+grep -q 'Конфликты refs' "$d/log"
+grep -q 'Заметка пропущена' "$d/log"
+if grep -q 'parameter not set' "$d/log"; then echo 'FAIL: note masked the original error'; exit 1; fi
+pass 'manual failure retains original error when Issue API metadata is unavailable'
 echo "sync.sh: $n functional scenarios passed"

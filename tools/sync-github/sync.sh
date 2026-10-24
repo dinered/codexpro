@@ -34,6 +34,10 @@ g remote add gitlab "$GITLAB_REPO_URL"
 g remote add github "$GITHUB_REPO_URL"
 note() {
   [ -n "${SYNC_NOTE_ISSUE:-}" ] && [ -n "${GITLAB_SYNC_TOKEN:-}" ] || return 0
+  if [ -z "${CI_API_V4_URL:-}" ] || [ -z "${CI_PROJECT_ID:-}" ]; then
+    echo 'Заметка пропущена: отсутствует API URL/project ID; исходная ошибка сохранена' >&2
+    return 0
+  fi
   printf 'url = "%s/projects/%s/issues/%s/notes"\nheader = "PRIVATE-TOKEN: %s"\nform-string = "body=%s"\nfail\nsilent\nshow-error\noutput = "/dev/null"\n' \
     "$CI_API_V4_URL" "$CI_PROJECT_ID" "$SYNC_NOTE_ISSUE" "$GITLAB_SYNC_TOKEN" "$1${CI_PIPELINE_URL:+ Пайплайн: $CI_PIPELINE_URL}" | curl -K -
 }
