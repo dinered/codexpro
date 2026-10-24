@@ -1,0 +1,16 @@
+{
+  "name": "codexpro-browser-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test server/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.12.0",
+    "@types/node": "26.6.4",
+    "typescript": "5.9.3",
+    "zod": "4.4.3"
+  }
+}

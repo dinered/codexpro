@@ -1,0 +1,3 @@
+#!/bin/sh
+# Compatibility entrypoint; all live deployment turns use stable per-chat bindings.
+exec /opt/bridge/router "$@"

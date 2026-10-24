@@ -1,0 +1,6 @@
+--- a/selectors/chatgpt.yaml
++++ b/selectors/chatgpt.yaml
+@@ -20 +20,2 @@
+-  send_button: 'button[data-testid="send-button"], button[aria-label="Отправить"], button[aria-label="Send prompt"]'
++  send_button: 'button[data-testid="send-button"], button[aria-label="Отправить"], button[aria-label="Send prompt"], button[aria-label="Send"]'
++  idle_button: 'button[aria-label="Start Voice"]'

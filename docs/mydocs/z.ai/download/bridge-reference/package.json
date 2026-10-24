@@ -1,0 +1,23 @@
+{
+  "name": "chatgpt-bridge",
+  "version": "3.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Мост Paseo → web ChatGPT: протокол v3, темп человека, эпохи владения, идемпотентность",
+  "scripts": {
+    "start": "node src/main.ts",
+    "demo": "node src/main.ts --driver human",
+    "plugin": "node plugin-client/cli.ts",
+    "test": "node --test tests/unit/*.test.ts tests/contract/*.test.ts tests/chaos/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "linkedom": "^0.18.5",
+    "playwright-core": "1.63.0",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^5.9.3"
+  }
+}
