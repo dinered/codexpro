@@ -442,3 +442,27 @@ test("контракт 16: сигнал оператора до отправки
     await cleanup(ctx);
   }
 });
+
+test("контракт 17: клиент ack+dispose сразу — очередь не ждёт ackWait закрытого хода", async () => {
+  const ctx = await makeCtx({ generationMs: 100 });
+  try {
+    // клиент подтверждает и СРАЗУ удаляет каталог — штатный путь референс-клиента
+    const first = await ctx.client.put("первый ход", ALIVE);
+    const run = bridgeFor(ctx);
+    await pump(ctx, async () => (await readResult(join(ctx.root, first.id))) !== null);
+    const got = await ctx.client.waitResult(first.id, 30_000);
+    assert.equal(got?.status, "ok");
+    await ctx.client.dispose(first.id); // ack был внутри waitResult; каталог удалён
+    // мост обязан распознать подтверждение (ack или удаление каталога после ack)
+    // и продолжить очередь; старое поведение — висеть до ackWaitMs и дать
+    // TURN_ACK_TIMEOUT по уже закрытому ходу
+    const second = await ctx.client.put("второй ход сразу", ALIVE);
+    const ok = await pump(ctx, async () => (await readResult(join(ctx.root, second.id))) !== null, 120_000);
+    assert.ok(ok, "второй ход не исполнен — мост застрял на закрытом ходе");
+    assert.ok(ctx.lines.some((line) => line.includes("TURN_ACK")), "подтверждение первого хода не распознано");
+    assert.equal(ctx.driver.sendCount, 2);
+    await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});

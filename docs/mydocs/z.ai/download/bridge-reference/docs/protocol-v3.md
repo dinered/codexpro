@@ -40,7 +40,9 @@ claimed → preparing → typing → sending → sent → generating → harvest
 - `generating` — ожидание конца ответа по совокупности признаков платформы.
 - `harvesting` — снятие текста ответа и конвертация в markdown.
 - `result` — `result.json` записан.
-- `confirmed` — плагин переименовал `result.json` в `result.ack`.
+- `confirmed` — плагин подтвердил: переименовал `result.json` в `result.ack` или удалил
+  каталог хода (удалять можно только после ack). Мост распознаёт оба варианта и
+  не блокирует очередь ожиданием уже закрытого хода.
 
 ## 3. Права и обязанности сторон
 
