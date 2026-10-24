@@ -1,0 +1,29 @@
+# Deploy the separate browser/router containers
+
+The chosen runtime is the existing Paseo container with its native provider,
+a separate Chrome/noVNC container, and a separate protocol-v3 bridge container.
+Paseo is not rebuilt or restarted. The paused all-in-Paseo draft is not used.
+
+Run `scripts/deploy-sidecars-host.sh <full-source-sha> prepare` on VM108 through
+the operator's existing trusted SSH access. The helper reads the running Paseo
+home bind, exports only the reviewed Git archive from its existing staging
+repository, builds the exact image and writes a non-secret review packet to
+`data/codexpro-deploy-20261024/sidecar-image-review.txt` in the First Mate home.
+It starts no services in prepare mode.
+
+After independent image/config review, run the same helper with
+`<full-source-sha> start-browser <reviewed-image-id>`. It verifies source/image
+identity and the existing profile volume before recreating only the scoped
+browser. The viewer is `http://192.168.11.241:6081/vnc.html`. CDP/raw VNC stay
+internal. The bridge profile is opt-in with restart:no; startup/challenge failures
+require explicit operator resume. Keep its dedicated state and browser profile.
+
+The live target-image per-chat fixture, noVNC identity/manual input, persistent
+profile restart, DE egress and native provider/catalog acceptance remain required.
+Source CI is a smoke job; it does not perform these deployment checks. The local
+headless per-chat scenario already passed and should not be repeated as a
+substitute for target-image acceptance.
+
+Rollback stops only the new bridge/browser services, preserving their profile
+and state. Never use down-v/prune or remove another service. Mac is installation
+transport/viewer only; it is not needed for the running browser/router.
