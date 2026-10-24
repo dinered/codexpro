@@ -148,6 +148,26 @@ GitLab credential с расширенными правами, общий shell r
 не даёт общего preflight всех refs и расписания существующего CI job.
 Поэтому минимально расширен уже используемый скрипт, без новых сервисов и доступов.
 
+После сообщения оператора «у нас enterprise» повторно проверен штатный вариант на
+коде GitLab `19.4.1-ee`. В текущей справке Pull mirror сказано, что divergent tag
+не обновляется. Исходный код этой версии расходится с этим обещанием: `UpdateMirrorService`
+снимает старые теги, затем вызывает `project.fetch_mirror(forced: true)` и после fetch
+обрабатывает изменённые теги; отдельная проверка расхождения есть для веток, но не для
+тегов. Gitaly превращает этот запрос в fetch с `--force --tags`. В изолированных bare
+репозиториях команда с тем же набором флагов и refspec веток переместила уже
+существующий одноимённый тег с локального commit на upstream commit. Это означает,
+что штатный pull может переписать тег на GitLab при разнонаправленных тегах; проверка
+защиты тегов и обработчики событий не являются общим preflight двух серверов.
+
+Источники реализации: [GitLab `UpdateMirrorService`](https://gitlab.com/gitlab-org/gitlab/-/blob/v19.4.1-ee/ee/app/services/projects/update_mirror_service.rb),
+[Gitaly `FetchRemote`](https://gitlab.com/gitlab-org/gitaly/-/blob/v19.4.1/internal/gitaly/service/repository/fetch_remote.go)
+и [Gitaly flags для fetch](https://gitlab.com/gitlab-org/gitaly/-/blob/v19.4.1/internal/git/localrepo/remote.go).
+Это противоречит [документации Pull mirror](https://docs.gitlab.com/user/project/repository/mirror/pull/).
+Поэтому native bidirectional mirroring пока не принимается как безопасное для данного
+требования: до выбора требуется reproducer на двух временных проектах точной версии
+GitLab, без реальных refs codexpro. Если поведение подтвердится, нужен обход или
+исправление GitLab до включения синхронизации.
+
 ## Локальная проверка
 
 ```sh
