@@ -1,4 +1,12 @@
-# Verified deployment — 2026-10-24
+# Deployed runtime; consecutive-turn acceptance failed — 2026-10-24
+
+**Open defect:** a later message remained in the Chrome composer while Paseo
+completed its turn with the previous assistant answer. The first successful
+single-turn receipt does not establish reliable consecutive-message operation.
+Track the correction in [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7)
+and see [the incident record](INCIDENT-STALE-ANSWER.md) for evidence, limits and
+acceptance criteria. Runtime readiness and an acknowledgement do not prove that
+the platform accepted a new message or generated an answer for it.
 
 Browser and router were last verified running on VM108; native provider `codexpro-browser`
 is available in Paseo as **ChatGPT (Chrome)**, model `chatgpt`. A new Paseo
@@ -10,6 +18,8 @@ native message in **ChatGPT — рабочий чат** received the answer `р�
 Paseo and completed with native status `idle` and protocol acknowledgement.
 Its task text exactly matched ordinary user input, without agent metadata.
 Earlier failed/cancelled messages were retained and were not replayed.
+Subsequent operator use exposed the defect above. The successful single-turn
+evidence is retained; the general acceptance claim is withdrawn.
 
 - Browser source: `e04c76b0f607c9dbf145b648c38893e1a243857b`.
 - Browser image: `sha256:a36ac8dc2761da676ed9823559b4a5fdd9b0fbfd4dcb7d1c2b69ee1a2d9cc90b`.
@@ -35,7 +45,7 @@ router activation or the subsequent router-only URL-race fix.
 Login persistence across a browser restart has not been verified. The successful
 live message establishes authentication for the current session.
 
-## Deployed corrections and acceptance
+## Deployed corrections and limited acceptance
 
 The running router includes the exact `Send` button-label alias and a bounded first-URL
 settling wait: up to two seconds after persisted send intent, with target and
@@ -66,6 +76,9 @@ The reviewed guarded helper replaced only the router and passed readiness,
 actual source hashes, exact image/configuration/bind checks, unchanged browser
 identity/restart count, and all five previous acknowledged-turn snapshots.
 The distinct live acceptance then delivered its answer and completed in Paseo.
+Later consecutive-turn evidence shows that completion can also return a stale
+answer when submission is unconfirmed. No correction for that defect has been
+deployed. The cause of the ineffective Enter remains unknown.
 Browser/profile/state, earlier failed turns and paused packaging work remain
 preserved. General agent-message metadata filtering remains separate issue #6;
 ordinary native input was used for this acceptance.
@@ -107,3 +120,6 @@ Latest records are `voice-idle-review-packet.json`, `voice-idle-apply-exit.json`
 `voice-idle-history-after.json` and `live-acceptance-voice-idle.json`. The running
 configuration SHA-256 is `fab0cc65c5dbd820c74edb657881e6689c4c691994fcef531832528afee7f24b`;
 override SHA-256 is `4641c6fc46cbdbd9cadac1ad65679790b17bc0948daa390d7babf7d1f0a0a38a`.
+The later read-only observation is `consecutive-send-dom-evidence.json` at
+19:59:16 UTC. It records only message-match flags, counts and sizes; private
+message text and conversation URLs are omitted from the published report.
