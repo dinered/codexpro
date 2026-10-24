@@ -31,6 +31,7 @@ RUN echo 'f3b28c68da9ff452e3180fab0075c4e6b4dff79003091e32b948f348c164e80a  src/
 COPY deploy/bridge/runtime/ /app/deployment/
 COPY deploy/bridge/supervise.py deploy/bridge/health.py deploy/bridge/bridge deploy/bridge/router /opt/bridge/
 RUN chmod 755 /opt/bridge/bridge /opt/bridge/router \
+ && chmod -R a+rX /app /opt/bridge \
  && mkdir -p /home/node/profile /data/spool /data/control \
  && chown -R node:node /home/node/profile /data
 ENV DISPLAY=:0 PYTHONPATH=/opt/websockify BRIDGE_SPOOL=/data/spool \

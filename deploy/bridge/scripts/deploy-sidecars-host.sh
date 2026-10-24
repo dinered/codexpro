@@ -33,7 +33,7 @@ if [[ "$mode" = prepare ]]; then
   (( available_kb >= 10 * 1024 * 1024 )) || { echo 'At least10GiB free disk required before build.' >&2; exit 1; }
   docker exec -u paseo "$container" git -C "$repo" cat-file -e "$source_sha^{commit}"
   mkdir -m 700 "$stage"
-  docker exec -u paseo "$container" git -C "$repo" archive --format=tar "$source_sha" docs/mydocs/z.ai/download/bridge-reference deploy/bridge | tar -xf - -C "$stage"
+  docker exec -u paseo "$container" git -C "$repo" archive --format=tar "$source_sha" docs/mydocs/z.ai/download/bridge-reference deploy/bridge | tar --same-permissions -xf - -C "$stage"
   printf '%s\n' "$source_sha" > "$stage/SOURCE_SHA"
   docker exec -u paseo "$container" sh -c 'umask 077; mkdir -p /home/paseo/.paseo/codexpro; chmod 700 /home/paseo/.paseo/codexpro'
 fi
@@ -44,6 +44,11 @@ compose=(docker compose --env-file /dev/null -f compose.yaml)
 if [[ "$mode" = prepare ]]; then
   "${compose[@]}" build browser
   image_id=$(docker image inspect --format '{{.Id}}' "codexpro-reference:$source_sha")
+  # Read every static runtime tree and load dependencies as the default nonroot user.
+  # No browser, profile/state mount, network access or real prompt is involved.
+  docker run --rm -i --network none --entrypoint node "$image_id" --input-type=module \
+    < scripts/check-image-access.mjs > "$stage/runtime-access.txt" 2>&1 || { cat "$stage/runtime-access.txt"; exit 1; }
+  cat "$stage/runtime-access.txt"
   printf '%s\n' "$image_id" > "$stage/IMAGE_ID"
   printf '{"services":{"browser":{"image":"%s"},"bridge":{"image":"%s"}}}\n' "$image_id" "$image_id" > "$stage/image.override.json"
   "${compose[@]}" -f "$stage/image.override.json" config --format json > "$stage/effective-config.json"
@@ -56,7 +61,8 @@ if [[ "$mode" = prepare ]]; then
     docker image inspect --format 'User={{.Config.User}} Cmd={{json .Config.Cmd}}' "$image_id"
     docker run --rm --network none --entrypoint node "$image_id" --version
     docker run --rm --network none --entrypoint google-chrome-stable "$image_id" --version
-    sha256sum Dockerfile compose.yaml seccomp_profile.json supervise.py health.py
+    cat "$stage/runtime-access.txt"
+    sha256sum Dockerfile compose.yaml seccomp_profile.json supervise.py health.py scripts/check-image-access.mjs
   } > "$packet"
   docker exec -i -u paseo "$container" sh -c 'cat > /workspace/company/firstmate/data/codexpro-deploy-20261024/sidecar-image-review.txt' < "$packet"
   docker exec -i -u paseo "$container" sh -c 'cat > /workspace/company/firstmate/data/codexpro-deploy-20261024/sidecar-effective-config.json' < "$stage/effective-config.json"
