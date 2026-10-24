@@ -14,6 +14,8 @@ export interface MetricsFile {
   turns: { ok: number; error: number; cancelled: number };
   sends: { total: number; lastHour: number };
   pace: { errorStreak: number };
+  /** У-6: события сопротивления платформы — материал для инцидент-репортов */
+  resistance: { challenge: number; rateLimit: number; backoff: number };
   lastTurn?: { id: string; status: string; ms: number };
   fatal?: string;
 }
@@ -24,6 +26,7 @@ function empty(): MetricsFile {
     turns: { ok: 0, error: 0, cancelled: 0 },
     sends: { total: 0, lastHour: 0 },
     pace: { errorStreak: 0 },
+    resistance: { challenge: 0, rateLimit: 0, backoff: 0 },
   };
 }
 
@@ -67,6 +70,15 @@ export class Metrics {
     await this.save(state);
   }
 
+  /** У-6: событие сопротивления платформы. Отказ записи мост не останавливает. */
+  async recordResistance(kind: "challenge" | "rateLimit" | "backoff"): Promise<void> {
+    if (!this.file) return;
+    const state = await this.load();
+    state.resistance[kind] += 1;
+    state.updatedAt = new Date(this.clock.now()).toISOString();
+    await this.save(state);
+  }
+
   async recordFatal(reason: string): Promise<void> {
     if (!this.file) return;
     const state = await this.load();
@@ -95,6 +107,7 @@ export class Metrics {
       turns: { ...base.turns, ...parsed?.turns },
       sends: { ...base.sends, ...parsed?.sends },
       pace: { ...base.pace, ...parsed?.pace },
+      resistance: { ...base.resistance, ...parsed?.resistance },
     };
     return this.state;
   }

@@ -86,6 +86,10 @@ export function requiredBaseMs(textLength: number, cfg: PaceConfig): number {
  *   base · (1 + U[0; jitter]) − время с прошлой отправки, не меньше 0.
  * Джиттер односторонний — база никогда не опускается ниже minIntervalMs (birdview §4).
  * Первая отправка в запуске вычитает ноль: мгновенной отправки после старта нет (П-2).
+ *
+ * typingPhysical (У-3): текст вводится порциями ФИЗИЧЕСКИ в фазе typing — его
+ * время уже заплатит стена, и в базу паузы оно не входит, иначе мост платит
+ * дважды и становится МЕДЛЕННЕЕ человека (нарушение П-1 в другую сторону).
  */
 export function pauseBeforeSend(options: {
   now: number;
@@ -93,9 +97,10 @@ export function pauseBeforeSend(options: {
   textLength: number;
   cfg: PaceConfig;
   rand: Random;
+  typingPhysical?: boolean;
 }): number {
-  const { now, lastSentAt, textLength, cfg, rand } = options;
-  const base = requiredBaseMs(textLength, cfg);
+  const { now, lastSentAt, textLength, cfg, rand, typingPhysical } = options;
+  const base = typingPhysical ? cfg.minIntervalMs : requiredBaseMs(textLength, cfg);
   const stretched = Math.round(base * (1 + cfg.jitter * rand.next()));
   const since = lastSentAt === null ? 0 : Math.max(0, now - lastSentAt);
   return Math.max(0, stretched - since);
@@ -132,6 +137,8 @@ export class Pacer {
   private window: number[] = [];
   private streak = 0;
   private warnedAtCount = -1;
+  /** до какого момента длится пауза серии ошибок (У-7; 0 — паузы нет) */
+  private backoffUntil = 0;
 
   constructor(cfg: PaceConfig, rand: Random) {
     this.cfg = cfg;
@@ -150,9 +157,10 @@ export class Pacer {
     return { gate: "ok", sentInWindow, warn };
   }
 
-  /** Пауза перед отправкой text в момент now (мс; 0 — ждать не нужно). */
-  delayFor(text: string, now: number): number {
-    return pauseBeforeSend({ now, lastSentAt: this.lastSentAt, textLength: text.length, cfg: this.cfg, rand: this.rand });
+  /** Пауза перед отправкой text в момент now (мс; 0 — ждать не нужно).
+   *  typingPhysical — набор идёт физически (У-3): typingTimeMs из базы исключён. */
+  delayFor(text: string, now: number, typingPhysical = false): number {
+    return pauseBeforeSend({ now, lastSentAt: this.lastSentAt, textLength: text.length, cfg: this.cfg, rand: this.rand, typingPhysical });
   }
 
   /** Отметить фактическую отправку — вызывается строго после клика (точка невозврата пройдена). */
@@ -166,10 +174,13 @@ export class Pacer {
     this.streak = 0;
   }
 
-  /** Ошибка платформы. Возвращает паузу серии (0 — серия не достигла лимита). */
-  recordError(): number {
+  /** Ошибка платформы. Возвращает паузу серии (0 — серия не достигла лимита).
+   *  now — момент ошибки (тот же Clock, что у вызывающего; У-7). */
+  recordError(now: number): number {
     this.streak += 1;
-    return backoffAfterErrors(this.streak, this.cfg);
+    const pauseMs = backoffAfterErrors(this.streak, this.cfg);
+    this.backoffUntil = now + pauseMs; // pauseMs = 0 — паузы нет, срез вернёт null
+    return pauseMs;
   }
 
   /** Часовой предел не считается ошибкой платформы (П-3) — серия не трогается. */
@@ -190,9 +201,14 @@ export class Pacer {
     return this.lastSentAt;
   }
 
-  /** Срез для файла метрик (birdview §1, модуль metrics). */
+  /** Срез для файла метрик (birdview §1, модуль metrics).
+   *  backoffUntilMs — до какого момента длится пауза серии ошибок (Н-5); null — паузы нет (У-7). */
   snapshot(now: number): { sentLastHour: number; streak: number; backoffUntilMs: number | null } {
-    return { sentLastHour: countInWindow(this.window, now), streak: this.streak, backoffUntilMs: null };
+    return {
+      sentLastHour: countInWindow(this.window, now),
+      streak: this.streak,
+      backoffUntilMs: this.backoffUntil > now ? this.backoffUntil : null,
+    };
   }
 
   /** Окно без устаревших отметок: единая точка обрезки для всех проверок (П-3). */

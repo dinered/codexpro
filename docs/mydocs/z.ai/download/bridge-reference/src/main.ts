@@ -100,7 +100,7 @@ try {
 async function openChatGptDriver(cfg: BridgeConfig, profile: PlatformProfile, log: Logger): Promise<ChatGptDriver> {
   const browser = await chromium.connectOverCDP(cfg.cdpUrl).catch((error: unknown) => {
     throw new Error(
-      `нет Chrome с отладкой на ${cfg.cdpUrl} — см. README, раздел «Запуск»: ${errorMessage(error)}`,
+      `нет Chrome с отладкой на ${cfg.cdpUrl} — см. README, разделы «Запуск» (правила запуска Chrome) и «Что видит платформа»: ${errorMessage(error)}`,
     );
   });
   const pages = browser.contexts().flatMap((context) => context.pages());

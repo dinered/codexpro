@@ -107,9 +107,9 @@ test("Pacer: час спустя окно свободно — счётчик п
 
 test("Pacer: часовой лимит не трогает серию ошибок (R10, П-3)", () => {
   const pacer = new Pacer(cfg, zero);
-  pacer.recordError();
-  pacer.recordError();
-  pacer.recordError();
+  pacer.recordError(0);
+  pacer.recordError(0);
+  pacer.recordError(0);
   const streakBefore = pacer.errorStreak;
   pacer.noteRateLimit();
   pacer.limitCheck(0);
@@ -118,10 +118,33 @@ test("Pacer: часовой лимит не трогает серию ошибо
 
 test("Pacer: успех сбрасывает серию ошибок, пауза растёт от серии (Н-5)", () => {
   const pacer = new Pacer(cfg, zero);
-  assert.equal(pacer.recordError(), 0);
-  assert.equal(pacer.recordError(), 0);
-  assert.equal(pacer.recordError(), cfg.errorBackoffMs); // третья подряд — пауза
+  assert.equal(pacer.recordError(0), 0);
+  assert.equal(pacer.recordError(0), 0);
+  assert.equal(pacer.recordError(0), cfg.errorBackoffMs); // третья подряд — пауза
   pacer.recordSuccess();
   assert.equal(pacer.errorStreak, 0);
-  assert.equal(pacer.recordError(), 0); // серия началась заново
+  assert.equal(pacer.recordError(0), 0); // серия началась заново
+});
+
+test("Pacer: backoffUntilMs в срезе — пауза серии видна и гаснет по времени (У-7)", () => {
+  const pacer = new Pacer(cfg, zero);
+  assert.equal(pacer.snapshot(10_000).backoffUntilMs, null, "без ошибок паузы нет");
+  pacer.recordError(10_000);
+  pacer.recordError(10_000);
+  assert.equal(pacer.snapshot(10_000).backoffUntilMs, null, "серия ниже лимита — паузы нет");
+  const pauseMs = pacer.recordError(10_000);
+  assert.equal(pauseMs, cfg.errorBackoffMs);
+  assert.equal(pacer.snapshot(10_000).backoffUntilMs, 10_000 + cfg.errorBackoffMs);
+  assert.equal(pacer.snapshot(10_000 + cfg.errorBackoffMs).backoffUntilMs, null, "пауза истекла — null");
+  pacer.recordSuccess();
+  pacer.recordError(20_000); // серия заново — ниже лимита
+  assert.equal(pacer.snapshot(20_000).backoffUntilMs, null);
+});
+
+test("Pacer: физический набор (У-3) — typingTimeMs исключён из базы паузы", () => {
+  const noJitter = { next: () => 0, int: (n: number) => 0, pick: <T,>(xs: readonly T[]) => xs[0]! };
+  const pacer = new Pacer(cfg, noJitter);
+  const long = "x".repeat(1_000); // typingTimeMs упирается в maxTypingMs (120 с)
+  assert.equal(pacer.delayFor(long, 0), cfg.maxTypingMs, "instant: база = время набора");
+  assert.equal(pacer.delayFor(long, 0, true), cfg.minIntervalMs, "chunks: база = minIntervalMs без typingTime");
 });

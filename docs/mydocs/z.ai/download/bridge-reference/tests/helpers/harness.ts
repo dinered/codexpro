@@ -53,6 +53,7 @@ export function testConfig(
     cancelPollMs: 50,
     pollBaseMs: 300,
     typeRetries: 2,
+    inputMode: "instant",
     metricsDir: null,
     pace: testPace(paceOverride ?? {}),
     ...rest,

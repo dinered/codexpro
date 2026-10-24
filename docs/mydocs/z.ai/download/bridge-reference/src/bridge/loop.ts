@@ -216,6 +216,7 @@ export class Bridge {
       case "error":
         this.deps.log.event(EVENT.TURN_ERROR, `${outcome.code}: ${outcome.message}`, { trace: task.traceId, turn: task.id });
         if (outcome.code === TURN_ERROR.RATE_LIMIT) {
+          await this.deps.metrics.recordResistance("rateLimit").catch(() => {}); // У-6
           await this.waitForWindowSlot();
         } else if (outcome.code === TURN_ERROR.PLATFORM_ERROR) {
           await this.recordPlatformError();
@@ -226,9 +227,10 @@ export class Bridge {
 
   /** Н-5: серия ошибок платформы — пауза 5 мин с удвоением, потолок 30 мин, сброс после успеха. */
   private async recordPlatformError(): Promise<void> {
-    const pauseMs = this.deps.pacer.recordError();
+    const pauseMs = this.deps.pacer.recordError(this.deps.clock.now());
     await this.deps.metrics.recordPace(this.deps.pacer.errorStreak).catch(() => {});
     if (pauseMs <= 0) return;
+    await this.deps.metrics.recordResistance("backoff").catch(() => {}); // У-6
     this.deps.log.event(EVENT.PACE_BACKOFF, `серия ошибок платформы: ${this.deps.pacer.errorStreak} — пауза ${Math.round(pauseMs / 60_000)} мин (Н-5)`);
     await this.waitStoppable(pauseMs);
   }
