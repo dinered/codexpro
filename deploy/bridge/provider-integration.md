@@ -20,8 +20,8 @@ No broad home/workspace mount enters the router, and no new mount or restart
 is needed for Paseo. The router bind has create_host_path:false, so a missing
 or wrong source cannot silently become a root-owned directory. Browser profile
 stays in its original dedicated volume. No Docker socket, host listener or
-new SSH/credential is required. Actual mounting, plugin installation and router
-start await exact config/source/image review and live bind confirmation.
+new SSH/credential is required. Actual mounting, plugin installation and router startup have been reviewed and
+verified; see [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for the deployed identities.
 
 The native plugin default state path matches the dedicated Paseo subdirectory;
 CODEXPRO_STATE_DIR can select a separately reviewed existing path. Plugins are
@@ -51,8 +51,9 @@ open. Stop the router before manual interaction, and resume explicitly.
 Isolated real-browser acceptance passed in local headless Chrome for
 Testing155.0.8059.12: two native sessions, four local synthetic sends, queued
 cancellation without sending, router/session restart and closed-tab recovery.
-Target Google Chrome Stable156 image, noVNC and profile-restart acceptance remain
-pending. Unit checks cover persistence, trace-matched
+The same per-chat scenario also passed on deployed Google Chrome Stable156;
+noVNC/manual login, DE egress and shared ready heartbeat are verified. Login
+persistence across a browser restart remains untested. Unit checks cover persistence, trace-matched
 results and refusal of cross-chat navigation. No real ChatGPT prompt is
 inferred from synthetic acceptance or plugin installation.
 
@@ -86,8 +87,7 @@ and proves its single shared Pacer limits sends across two chats.
 It overrides the platform profile to a dedicated container-loopback HTTP fixture;
 its start URL, all conversation URLs and synthetic sends stay on that origin.
 It exercises two native sessions, four synthetic sends, queued cancellation,
-router/session restart and closed-tab restoration. It must also pass against the new
-reviewed target image before claiming deployment acceptance. The earlier
+router/session restart and closed-tab restoration. It also passed against the reviewed deployed target image. The earlier
 real-Chrome shutdown fixture passed all three cases; that does not substitute
 for this per-chat acceptance.
 
@@ -102,5 +102,6 @@ paseo plugin ls --json
 
 Require the exact plugin running, native provider/catalog discovery and the
 synthetic scenario on the intended daemon. Do not restart Paseo or read/reuse
-its credential stores. This install/start is still pending review and live
-mapping confirmation; it was not performed during offline preparation.
+its credential stores. The installed provider is pinned to7c53c216a2c7013af8eb44f7476ecc65d0a71d6d;
+its source is unchanged at the deployed e04c76b image revision. Installation
+and model discovery were verified without restarting Paseo.

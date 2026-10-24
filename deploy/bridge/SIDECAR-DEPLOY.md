@@ -18,8 +18,11 @@ browser. The viewer is `http://192.168.11.241:6081/vnc.html`. CDP/raw VNC stay
 internal. The bridge profile is opt-in with restart:no; startup/challenge failures
 require explicit operator resume. Keep its dedicated state and browser profile.
 
-The live target-image per-chat fixture, noVNC identity/manual input, persistent
-profile restart, DE egress and native provider/catalog acceptance remain required.
+The deployed target-image per-chat fixture, viewer/manual login, DE egress,
+provider/model discovery and shared ready heartbeat have passed. See
+[DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for exact deployed identities.
+Login persistence across a browser restart and a real ChatGPT response remain
+unverified; the logged-in browser was deliberately kept running.
 Source CI is a smoke job; it does not perform these deployment checks. The local
 headless per-chat scenario already passed and should not be repeated as a
 substitute for target-image acceptance.

@@ -1,6 +1,6 @@
 # Docker pilot: ordinary Chrome and bridge reference
 
-Candidate configuration; first live start requires First Mate review. Source is
+Deployed pilot; see [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for verified runtime and remaining checks. Reference source is
 reference commit `9c556b1833cdad6589c85506605cd2ea4d156882`. The snapshot under
 `docs/mydocs/z.ai/download/bridge-reference` stays unchanged. Runtime overlays make `readPage` self-contained when Playwright serializes
 it and disconnect the bridge-owned CDP connection when the process completes.
@@ -19,14 +19,13 @@ The noVNC viewer is published on VM108's LAN address, `192.168.11.241:6081`,
 as requested for the same direct LAN access as harness-home. Open this URL in
 Chrome from a device on the local network:
 
-http://192.168.11.241:6081/vnc.html?autoconnect=1&resize=remote
+http://192.168.11.241:6081/vnc.html?autoconnect=1&resize=scale
 
 `BRIDGE_VIEWER_BIND_IP` defaults to that exact LAN address; verify it is still
 assigned to the Docker host before applying the configuration. CDP9222 and
 raw VNC5900 stay loopback-only inside the container. The viewer uses the same
 browser display and dedicated profile. This mapping needs no SSH tunnel,
-Docker socket, host-home mount or firewall/DNS change. The prepared LAN mapping
-has not yet been applied or verified on the host.
+Docker socket, host-home mount or firewall/DNS change. The LAN mapping is deployed; the operator confirmed the same Chrome screen and completed manual login.
 
 This is the remote Chrome's screen, not a second authenticated browser session.
 Captain manually navigates, logs in and handles CAPTCHA. No passwords, cookies
@@ -62,7 +61,7 @@ Startup opens `about:blank` only and does not run the bridge. Before navigating
 ChatGPT, confirm the approved existing network egress: project instructions
 require FOREIGN_STRICT. `CHROME_PROXY_SERVER` accepts a verified existing proxy;
 this package does not create a proxy/tunnel or change host routing. The
-candidate does not certify VM108's ChatGPT egress. Never include credentials
+deployed container returned DE in the country-only egress check. Never include credentials
 in that variable or command-line URLs.
 
 ## Manual takeover and bridge lifecycle
@@ -117,15 +116,14 @@ require the live checks below; a passing source suite does not establish them.
 sh deploy/bridge/check.sh
 ```
 
-The earlier deployed image built successfully and Chrome reached healthy.
-After an initial capacity stop, it was resumed under the direct deployment
-instruction. The latest remote update lost its SSH connection; current server
-health and image identity remain unconfirmed.
+The deployed Chrome Stable156 image and router have verified immutable image
+identity, healthy/running status, zero restarts and the reviewed state/port
+mappings. The existing Mac SSH route was restored and used for router startup.
 
 The three real-Chrome lifecycle cases passed with the shutdown overlay: stop,
 startup error and synthetic challenge exit without submissions while preserving
-Chrome. The operator fixture's initial profile marker was written; manual viewer
-input and persistence across a verified browser restart remain pending.
+Chrome. The operator confirmed viewer input and manual login. Persistence of that login
+across a browser/container restart has not been tested; the browser was kept running.
 
 The prepared `per-chat-browser.test.mjs` passed in isolated local Chrome for
 Testing155.0.8059.12 (headless), against a loopback HTTP fixture. It ran four
@@ -141,11 +139,11 @@ blocked sending. Adding the same fonts-liberation package used by the image to
 isolated temporary staging fixed the counterfactual; the exact scenario then
 passed without source or assertion changes. System packages stayed unchanged.
 
-Remaining live acceptance: verify exact image/config and host LAN address,
-publish only the approved6081 viewer, check noVNC/CDP identity and manual input,
-confirm dedicated-profile persistence across restart, verify DE egress, then
-install/discover the pinned provider and start the reviewed router. The existing
-SSH route is currently unavailable; direct SSH lacks a verified host-key entry.
+The same per-chat scenario also passed against the deployed Chrome Stable156
+image: four loopback sends, cancellation without a send, isolation, router/session
+restart and closed-tab recovery. Native provider/model discovery, DE egress and
+the actual shared router heartbeat passed. Remaining checks are the first
+operator-initiated ChatGPT response and login persistence across a browser restart.
 `operator-fixture.mjs` uses container-loopback port8049, which stays unpublished.
 
 Do not use real ChatGPT prompts as smoke. Operator login is a separate manual
