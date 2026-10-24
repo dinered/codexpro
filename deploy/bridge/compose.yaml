@@ -15,7 +15,7 @@ services:
     security_opt:
       - seccomp=./seccomp_profile.json
     ports:
-      - "127.0.0.1:6081:6080"
+      - "${BRIDGE_VIEWER_BIND_IP:-192.168.11.241}:6081:6080"
     environment:
       CHROME_START_URL: about:blank
       CHROME_PROXY_SERVER: ${CHROME_PROXY_SERVER:-}

@@ -101,3 +101,69 @@ test('stopped router and foreign-trace results fail without presenting another c
     assert.ok((await readdir(dir)).includes('result.json')); // Preserve bad output for operator review.
   } finally { await f.connection.close(); }
 });
+for (const mode of ['connection.close', 'session.close/reopen'] as const) {
+  test(`${mode} during pending put cancels the late task and emits no late turn`, async () => {
+    const {put} = await import('./protocol.ts');
+    const root = await mkdtemp(join(tmpdir(), 'provider-put-race-'));
+    await atomic(join(root, 'router.json'), {state: 'ready'});
+    let entered = false, late: Awaited<ReturnType<typeof put>> | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const connection = await createProvider({root, pollMs: 5, writeTask: async (...args) => {
+      entered = true; await gate; late = await put(...args); return late;
+    }}).connect({versions: [1], capabilities: ['prompt.message', 'session.persistence']});
+    const events: ProviderEvent[] = []; connection.onEvent(event => events.push(event));
+    try {
+      await connection.send({type: 'session.open', requestId: 'open', sessionId: 'A', config, history: 'skip'});
+      await waitUntil(() => events.some(e => e.type === 'session.ready'));
+      const saved = events.find(e => e.type === 'session.persistence') as Extract<ProviderEvent, {type: 'session.persistence'}>;
+      await connection.send(message('A', 'old-pending'));
+      await waitUntil(() => entered);
+      if (mode === 'connection.close') await connection.close();
+      else {
+        await connection.send({type: 'session.close', requestId: 'close', sessionId: 'A'});
+        await waitUntil(() => events.some(e => e.type === 'session.closed'));
+        await connection.send({type: 'session.open', requestId: 'reopen', sessionId: 'A', config, persistence: saved.persistence, history: 'skip'});
+        await waitUntil(() => events.filter(e => e.type === 'session.ready').length === 2);
+      }
+      const mark = events.length;
+      release();
+      await waitUntil(async () => Boolean(late && (await readdir(late.dir)).includes('cancel')));
+      const abandoned = late!;
+      assert.equal(events.slice(mark).filter(e => e.type === 'session.turn' || e.type === 'session.ready').length, 0);
+      if (mode === 'session.close/reopen') {
+        await connection.send(message('A', 'new-turn'));
+        await waitUntil(() => events.some(e => e.type === 'session.turn' && e.state === 'started'));
+        assert.notEqual(late!.dir, abandoned.dir);
+        await atomic(join(late!.dir, 'result.json'), {status: 'ok', traceId: late!.traceId, markdown: 'new answer'});
+        await waitUntil(() => events.some(e => e.type === 'session.turn' && e.state === 'completed'));
+        assert.ok((await readdir(abandoned.dir)).includes('cancel'));
+        assert.equal(events.filter(e => e.type === 'session.prompt_result' && e.clientMessageId === 'old-pending').length, 0);
+      }
+    } finally { release(); await connection.close(); }
+  });
+}
+test('closing during registration cannot emit stale ready after reopening', async () => {
+  const {register} = await import('./protocol.ts');
+  const root = await mkdtemp(join(tmpdir(), 'provider-open-race-'));
+  await atomic(join(root, 'router.json'), {state: 'ready'});
+  let entered = false, first = true, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const connection = await createProvider({root, registerChat: async (...args) => {
+    if (first) { first = false; entered = true; await gate; }
+    await register(...args);
+  }}).connect({versions: [1], capabilities: ['prompt.message', 'session.persistence']});
+  const events: ProviderEvent[] = []; connection.onEvent(event => events.push(event));
+  try {
+    await connection.send({type: 'session.open', requestId: 'old-open', sessionId: 'A', config, history: 'skip'});
+    await waitUntil(() => entered);
+    await connection.send({type: 'session.close', requestId: 'close', sessionId: 'A'});
+    await waitUntil(() => events.some(e => e.type === 'session.closed'));
+    await connection.send({type: 'session.open', requestId: 'new-open', sessionId: 'A', config, history: 'skip'});
+    await waitUntil(() => events.some(e => e.type === 'session.ready' && e.requestId === 'new-open'));
+    release();
+    await waitUntil(async () => (await readdir(join(root, 'registry'))).length === 2);
+    assert.equal(events.filter(e => e.type === 'session.ready' && e.requestId === 'old-open').length, 0);
+    assert.equal(events.filter(e => e.type === 'session.opened' && e.requestId === 'old-open').length, 0);
+  } finally { release(); await connection.close(); }
+});

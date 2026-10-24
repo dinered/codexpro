@@ -15,18 +15,18 @@ archives and Chrome package are SHA-256 pinned in Dockerfile. The existing
 harness-home Chrome/Xvnc pattern and its seccomp policy are reused, without
 its agent credentials, home volume or browser profiles.
 
-Only `127.0.0.1:6081` on the Docker host is published. VNC5900 and CDP9222
-are loopback-only *inside* the container. No Docker socket or host home is
-mounted. Browser access uses the existing SSH route, without new credentials,
-firewall/DNS rules or a LAN/public listener:
+The noVNC viewer is published on VM108's LAN address, `192.168.11.241:6081`,
+as requested for the same direct LAN access as harness-home. Open this URL in
+Chrome from a device on the local network:
 
-```sh
-# On Captain's Mac. Existing alias; local port 6081 must be free.
-ssh -N -o RemoteCommand=none -o RequestTTY=no -o ForwardAgent=no \
-  -o ExitOnForwardFailure=yes -L 127.0.0.1:6081:127.0.0.1:6081 harness-home
-# Open in ordinary Chrome on Mac:
-# http://127.0.0.1:6081/vnc.html?autoconnect=1&resize=remote
-```
+http://192.168.11.241:6081/vnc.html?autoconnect=1&resize=remote
+
+`BRIDGE_VIEWER_BIND_IP` defaults to that exact LAN address; verify it is still
+assigned to the Docker host before applying the configuration. CDP9222 and
+raw VNC5900 stay loopback-only inside the container. The viewer uses the same
+browser display and dedicated profile. This mapping needs no SSH tunnel,
+Docker socket, host-home mount or firewall/DNS change. The prepared LAN mapping
+has not yet been applied or verified on the host.
 
 This is the remote Chrome's screen, not a second authenticated browser session.
 Captain manually navigates, logs in and handles CAPTCHA. No passwords, cookies
@@ -48,6 +48,7 @@ does not establish physical-host capacity.
 ```sh
 cd deploy/bridge
 export BRIDGE_IMAGE_TAG=<exact-reviewed-git-sha>
+export BRIDGE_VIEWER_BIND_IP=192.168.11.241
 docker compose config --quiet
 docker compose build browser
 # Record immutable image ID and installed Chrome/Node versions before startup.
@@ -116,25 +117,36 @@ require the live checks below; a passing source suite does not establish them.
 sh deploy/bridge/check.sh
 ```
 
-The reviewed image built successfully and the initial browser reached healthy
-with zero restarts. It was then stopped cleanly (exit0, no OOM) because physical
-PVE MemAvailable fell below the 3GiB acceptance floor; the new image and profile
-are retained. The immediate manual readiness probe ran before CDP was listening;
-Docker health passed once startup completed. There is no completed noVNC,
-session-persistence or bridge-lifecycle acceptance yet.
+The earlier deployed image built successfully and Chrome reached healthy.
+After an initial capacity stop, it was resumed under the direct deployment
+instruction. The latest remote update lost its SSH connection; current server
+health and image identity remain unconfirmed.
 
-Planned live acceptance after capacity recovers and review: browser health, loopback-only bindings,
-same local fixture/tab through CDP and noVNC, dedicated-profile persistence
-across a controlled browser restart, manual stop/resume with no task loops.
-`lifecycle.test.mjs` is a pending local-fixture regression for operator stop,
-startup error and synthetic challenge; it verifies process exit, zero submissions
-and survival of the separately launched Chrome. Run it inside the reviewed
-browser container with Node after capacity is available. `operator-fixture.mjs`
-provides the local page for noVNC/CDP input identity and profile persistence:
-run its `serve` mode, then `set`, restart only this browser, restart the fixture
-server, then use `check`. Fixture origin is container-loopback port8049; it is
-never published. These helpers are prepared, syntax checked and have not yet
-run against Chrome.
+The three real-Chrome lifecycle cases passed with the shutdown overlay: stop,
+startup error and synthetic challenge exit without submissions while preserving
+Chrome. The operator fixture's initial profile marker was written; manual viewer
+input and persistence across a verified browser restart remain pending.
+
+The prepared `per-chat-browser.test.mjs` passed in isolated local Chrome for
+Testing155.0.8059.12 (headless), against a loopback HTTP fixture. It ran four
+synthetic sends through the native provider, reference engine and real browser:
+two conversations kept distinct targets/URLs, a queued cancellation sent nothing,
+router/session restart retained bindings and a closed tab recovered the same
+conversation. This is local integration evidence, not acceptance of the target
+Google Chrome Stable156 image or the deployed noVNC endpoint.
+
+The minimal local environment initially lacked fonts: a contenteditable field
+contained the inserted HTML but returned empty innerText, so TEXT_MISMATCH
+blocked sending. Adding the same fonts-liberation package used by the image to
+isolated temporary staging fixed the counterfactual; the exact scenario then
+passed without source or assertion changes. System packages stayed unchanged.
+
+Remaining live acceptance: verify exact image/config and host LAN address,
+publish only the approved6081 viewer, check noVNC/CDP identity and manual input,
+confirm dedicated-profile persistence across restart, verify DE egress, then
+install/discover the pinned provider and start the reviewed router. The existing
+SSH route is currently unavailable; direct SSH lacks a verified host-key entry.
+`operator-fixture.mjs` uses container-loopback port8049, which stays unpublished.
 
 Do not use real ChatGPT prompts as smoke. Operator login is a separate manual
 step, not synthetic-test evidence.

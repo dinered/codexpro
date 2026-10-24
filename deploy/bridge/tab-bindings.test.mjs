@@ -61,3 +61,22 @@ test('manual navigation to another conversation fails before the next send', asy
   await assert.rejects(bindings.beforeSend(a, page), /different conversation/);
   assert.equal((await bindings.read(a)).conversationUrl, 'https://chatgpt.com/c/owned');
 });
+test('different persisted keys cannot claim the same target or conversation during reconnect/recovery', async () => {
+  const {readFile, writeFile} = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'tab-exclusive-'));
+  const f = browserFixture(), a = randomUUID(), b = randomUUID();
+  const bindings = new TabBindings(f.browser, root, 'https://chatgpt.com/');
+  const pa = await bindings.page(a), pb = await bindings.page(b);
+  await bindings.beforeSend(a, pa); pa.current = 'https://chatgpt.com/c/shared'; await bindings.captureConversation(a, pa);
+  await bindings.beforeSend(b, pb); pb.current = 'https://chatgpt.com/c/shared';
+  await assert.rejects(bindings.captureConversation(b, pb), /already owns/);
+  assert.equal((await bindings.read(b)).conversationUrl, null);
+  // Previously corrupted/duplicated persisted state must fail on both original-target and URL recovery paths.
+  const bFile = join(root, `${b}.json`), originalB = JSON.parse(await readFile(bFile, 'utf8'));
+  await writeFile(bFile, JSON.stringify({...originalB, conversationUrl: 'https://chatgpt.com/c/shared'}));
+  await assert.rejects(new TabBindings(f.browser, root, 'https://chatgpt.com/').page(a), /already owns/);
+  await pa.close(); await pb.close();
+  await assert.rejects(new TabBindings(f.browser, root, 'https://chatgpt.com/').page(b), /already owns/);
+  await writeFile(bFile, JSON.stringify({...originalB, targetId: (await bindings.read(a)).targetId}));
+  await assert.rejects(new TabBindings(f.browser, root, 'https://chatgpt.com/').page(b), /already owns/);
+});

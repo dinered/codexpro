@@ -14,5 +14,7 @@ cd "$app"
 npm ci --ignore-scripts --no-audit --no-fund
 npm test
 npm run typecheck
-BRIDGE_APP="$app" node --test "$here/serialization.test.mjs" "$here/tab-bindings.test.mjs"
+node -e 'const fs=require("node:fs");const c=JSON.parse(fs.readFileSync("tsconfig.json","utf8"));c.include.push("deployment/**/*.ts");fs.writeFileSync("tsconfig.deploy.json",JSON.stringify(c));'
+npm exec tsc -- --project tsconfig.deploy.json
+BRIDGE_APP="$app" node --test "$here/serialization.test.mjs" "$here/tab-bindings.test.mjs" "$here/provider-engine.test.mjs"
 printf 'Validation copy retained: %s\n' "$app"

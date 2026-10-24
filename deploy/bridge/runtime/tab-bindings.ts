@@ -1,4 +1,4 @@
-import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, readdir, rename, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {Browser, Page} from 'playwright-core';
@@ -7,6 +7,7 @@ type Binding = {v: 1; key: string; targetId: string; conversationUrl: string | n
 export const validChatKey = (key: string) => /^[a-f0-9]{8}-[a-f0-9-]{27}$/.test(key);
 
 export class TabBindings {
+  private writes: Promise<void> = Promise.resolve();
   private browser: Browser;
   private root: string;
   private startUrl: string;
@@ -35,11 +36,30 @@ export class TabBindings {
       throw error;
     }
   }
-  private async save(binding: Binding) {
-    await mkdir(this.root, {recursive: true, mode: 0o700});
-    const file = this.file(binding.key), temporary = `${file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify(binding), {mode: 0o600, flag: 'wx'});
-    await rename(temporary, file);
+  private async assertExclusive(binding: Binding) {
+    const files = await readdir(this.root).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const key = file.slice(0, -5);
+      if (key === binding.key || !validChatKey(key)) continue;
+      const other = await this.read(key);
+      if (other && (other.targetId === binding.targetId ||
+        (binding.conversationUrl !== null && other.conversationUrl === binding.conversationUrl))) {
+        throw new Error('Another Paseo chat already owns this tab or conversation');
+      }
+    }
+  }
+  private save(binding: Binding) {
+    // The router holds the process-wide flock; serialize its in-process claim updates too.
+    const write = this.writes.catch(() => {}).then(async () => {
+      await mkdir(this.root, {recursive: true, mode: 0o700});
+      await this.assertExclusive(binding);
+      const file = this.file(binding.key), temporary = `${file}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(binding), {mode: 0o600, flag: 'wx'});
+      await rename(temporary, file);
+    });
+    this.writes = write;
+    return write;
   }
   private async target(page: Page) {
     const session = await page.context().newCDPSession(page);
@@ -50,6 +70,7 @@ export class TabBindings {
     let binding = await this.read(key);
     const pages = this.browser.contexts().flatMap(context => context.pages());
     if (binding) {
+      await this.assertExclusive(binding);
       for (const page of pages) {
         if (await this.target(page) === binding.targetId) {
           await this.assertPage(key, page);

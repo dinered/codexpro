@@ -48,9 +48,11 @@ when the router is stopped. Challenge/fatal errors pause the router; Compose
 restart remains no. Shutdown disconnects CDP while leaving Chrome and tabs
 open. Stop the router before manual interaction, and resume explicitly.
 
-Pending real Chrome acceptance: two local synthetic conversations through the
-native provider and reference engine, alternating turns, cancel, profile/router
-restart and closed-tab recovery. Unit checks cover persistence, trace-matched
+Isolated real-browser acceptance passed in local headless Chrome for
+Testing155.0.8059.12: two native sessions, four local synthetic sends, queued
+cancellation without sending, router/session restart and closed-tab recovery.
+Target Google Chrome Stable156 image, noVNC and profile-restart acceptance remain
+pending. Unit checks cover persistence, trace-matched
 results and refusal of cross-chat navigation. No real ChatGPT prompt is
 inferred from synthetic acceptance or plugin installation.
 
@@ -60,3 +62,45 @@ Disable only codexpro-browser and stop only the new router. Keep its state,
 registry, journals, results and the original browser profile. Browser/manual
 viewer continue independently. No down-v, prune, unrelated service change or
 chat-state deletion.
+
+## Reproducible checks and pending live acceptance
+
+From the repository root, in the reviewed source:
+
+```sh
+npm --prefix deploy/bridge/paseo-plugin ci --ignore-scripts --no-audit --no-fund
+npm --prefix deploy/bridge/paseo-plugin test
+npm --prefix deploy/bridge/paseo-plugin run typecheck
+# BRIDGE_APP is an isolated reference copy with the three runtime overlays.
+BRIDGE_APP=/path/to/patched/app node --test deploy/bridge/tab-bindings.test.mjs deploy/bridge/provider-engine.test.mjs
+```
+
+The native-provider tests include close/reopen while task publication is pending,
+connection teardown, registration teardown, simultaneous chats and a foreign
+trace response. Binding checks refuse duplicate target or conversation claims
+across persisted keys and serialize claim updates under the router's flock.
+The provider-engine fixture exchanges actual v3 files with the reference engine
+and proves its single shared Pacer limits sends across two chats.
+
+`per-chat-browser.test.mjs` passed against isolated local Chrome for Testing.
+It overrides the platform profile to a dedicated container-loopback HTTP fixture;
+its start URL, all conversation URLs and synthetic sends stay on that origin.
+It exercises two native sessions, four synthetic sends, queued cancellation,
+router/session restart and closed-tab restoration. It must also pass against the new
+reviewed target image before claiming deployment acceptance. The earlier
+real-Chrome shutdown fixture passed all three cases; that does not substitute
+for this per-chat acceptance.
+
+After the live bind and new image are reviewed, the supported pinned install is:
+
+```sh
+paseo plugin install http://gitlab.home.arpa/ai-company/codexpro.git \
+  --path deploy/bridge/paseo-plugin --ref <reviewed-source-sha> \
+  --id codexpro-browser --json
+paseo plugin ls --json
+```
+
+Require the exact plugin running, native provider/catalog discovery and the
+synthetic scenario on the intended daemon. Do not restart Paseo or read/reuse
+its credential stores. This install/start is still pending review and live
+mapping confirmation; it was not performed during offline preparation.
