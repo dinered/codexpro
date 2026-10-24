@@ -111,7 +111,7 @@ variables не установлено (их значения не запраши
 
 Раннер по умолчанию `merge-train-smoke`, переопределяется `SYNC_RUNNER_TAG`.
 Для production script нужны POSIX shell, git с поддержкой atomic push, curl,
-обычные Unix utilities и доступ к обоим серверам. Для тестов нужен Node.js ≥22.
+обычные Unix utilities и доступ к обоим серверам. Для тестов достаточно тех же shell/Git utilities.
 Никаких токенов в URL/argv/config со значениями: Git получает их из переменных
 через credential helper, curl — через stdin. Используйте только URL без credentials.
 
