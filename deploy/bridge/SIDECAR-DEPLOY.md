@@ -21,7 +21,7 @@ require explicit operator resume. Keep its dedicated state and browser profile.
 The deployed target-image per-chat fixture, viewer/manual login, DE egress,
 provider/model discovery and shared ready heartbeat have passed. See
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for exact deployed identities.
-Login persistence across a browser restart and a real ChatGPT response remain
+Login persistence across a browser restart and successful reply forwarding to Paseo remain
 unverified; the logged-in browser was deliberately kept running.
 Source CI is a smoke job; it does not perform these deployment checks. The local
 headless per-chat scenario already passed and should not be repeated as a

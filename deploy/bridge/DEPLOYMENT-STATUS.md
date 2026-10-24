@@ -3,24 +3,33 @@
 Browser and router are running on VM108; native provider `codexpro-browser`
 is available in Paseo as **ChatGPT (Chrome)**, model `chatgpt`. A new Paseo
 conversation receives its own persistent Chrome tab. The operator completed
-manual ChatGPT login. No real ChatGPT prompt was submitted during acceptance;
-the first operator-initiated response remains unverified.
+manual ChatGPT login. Synthetic acceptance submitted no real ChatGPT prompts. The first operator
+message received a reply in Chrome, but exposed a URL-binding race before
+forwarding to Paseo. The router fix is deployed; forwarding the next operator
+message remains to be verified. The original message was not replayed.
 
-- Runtime source: `e04c76b0f607c9dbf145b648c38893e1a243857b`.
-- Browser/router image: `sha256:a36ac8dc2761da676ed9823559b4a5fdd9b0fbfd4dcb7d1c2b69ee1a2d9cc90b`.
+- Browser source: `e04c76b0f607c9dbf145b648c38893e1a243857b`.
+- Browser image: `sha256:a36ac8dc2761da676ed9823559b4a5fdd9b0fbfd4dcb7d1c2b69ee1a2d9cc90b`.
+- Router source: `f486ec7fe535f4f8571a1376cc7adc990886dbc6`.
+- Router image: `sha256:8163947441f8b76ebe1d0b9b41dde73e87e8b3b2e8c6eaeba3f036949cea1abb`.
 - Installed provider source: `7c53c216a2c7013af8eb44f7476ecc65d0a71d6d`; provider source unchanged at runtime revision.
 - Viewer: http://192.168.11.241:6081/vnc.html?autoconnect=1&resize=scale
 - Profile volume: `codexpro-reference_profile` at `/home/node/profile`.
 - State: host `/opt/stacks/paseo-beta/paseo-home/.paseo/codexpro`, Paseo `/home/paseo/.paseo/codexpro`, router `/data` (only this dedicated RW bind).
 
-Target Chrome Stable156 passed the local two-chat scenario: four loopback
+Target Chrome Stable 156 passed the local two-chat scenario: four loopback
 synthetic sends, cancellation without sending, independent conversations,
-router/session restart and closed-tab recovery. Nonroot validation read1805
+router/session restart and closed-tab recovery. Nonroot validation read 1805
 static files and loaded runtime dependencies. Actual browser was healthy with
 zero restarts/OOM; router was running with a fresh shared ready heartbeat.
 Country-only container egress returned **DE**. Native plugin/provider/model
 catalogs were checked. No Paseo or logged-in browser restart was needed for
-router activation.
+router activation or the subsequent router-only URL-race fix.
+
+The fix handles the first conversation URL appearing between two checks, after
+send intent was persisted. Same-target/origin and cross-chat exclusivity checks
+remain enforced. Five binding tests and a target-image fixture with a75ms URL
+transition delay passed. Failed task/result/journal files were retained unchanged.
 
 A browser restart after manual login has not been performed. Persistent volume
 configuration and tab recovery do not prove authentication survives that restart.

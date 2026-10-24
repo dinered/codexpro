@@ -142,8 +142,8 @@ passed without source or assertion changes. System packages stayed unchanged.
 The same per-chat scenario also passed against the deployed Chrome Stable156
 image: four loopback sends, cancellation without a send, isolation, router/session
 restart and closed-tab recovery. Native provider/model discovery, DE egress and
-the actual shared router heartbeat passed. Remaining checks are the first
-operator-initiated ChatGPT response and login persistence across a browser restart.
+the actual shared router heartbeat passed. Remaining checks are successful forwarding of the next
+operator-initiated ChatGPT response to Paseo and login persistence across a browser restart.
 `operator-fixture.mjs` uses container-loopback port8049, which stays unpublished.
 
 Do not use real ChatGPT prompts as smoke. Operator login is a separate manual
