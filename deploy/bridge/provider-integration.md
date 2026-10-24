@@ -62,6 +62,12 @@ and completed with acknowledgement. The supported ordinary input path omitted
 agent provenance, and its exact task text was verified; general agent-message
 metadata filtering remains issue #6.
 
+That single-turn result is insufficient for consecutive-message acceptance.
+Subsequent operator use left a new draft in Chrome while Paseo returned the
+previous assistant answer. [Issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7)
+tracks proof of submission and answer ownership for each new turn. No correction
+is deployed; native `idle` and `result.ack` alone do not establish those facts.
+
 ## Rollback
 
 Disable only codexpro-browser and stop only the new router. Keep its state,
