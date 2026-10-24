@@ -80,3 +80,28 @@ test('different persisted keys cannot claim the same target or conversation duri
   await writeFile(bFile, JSON.stringify({...originalB, targetId: (await bindings.read(a)).targetId}));
   await assert.rejects(new TabBindings(f.browser, root, 'https://chatgpt.com/').page(b), /already owns/);
 });
+
+test('first conversation URL arriving between capture and assertion is saved once without another send', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tab-first-url-race-'));
+  const f = browserFixture(), key = randomUUID();
+  const bindings = new TabBindings(f.browser, root, 'https://chatgpt.com/');
+  const page = await bindings.page(key);
+  await bindings.beforeSend(key, page);
+  // ChatGPT updates its URL asynchronously after Enter. Capture still sees the
+  // new-chat page; the following assertion sees the created conversation.
+  let reads = 0;
+  page.url = () => reads++ === 0 ? 'https://chatgpt.com/' : 'https://chatgpt.com/c/first-reply';
+  await bindings.captureConversation(key, page);
+  assert.equal((await bindings.read(key)).conversationUrl, null);
+  await bindings.assertPage(key, page);
+  assert.equal((await bindings.read(key)).conversationUrl, 'https://chatgpt.com/c/first-reply');
+  page.url = () => 'https://chatgpt.com/c/foreign';
+  await assert.rejects(bindings.beforeSend(key, page), /different conversation/);
+  assert.equal((await bindings.read(key)).conversationUrl, 'https://chatgpt.com/c/first-reply');
+
+  const unsent = randomUUID(), unbound = await bindings.page(unsent);
+  unbound.current = 'https://chatgpt.com/c/foreign';
+  await assert.rejects(bindings.assertPage(unsent, unbound), /before its first confirmed send/);
+  assert.equal((await bindings.read(unsent)).hasSent, false);
+  assert.equal((await bindings.read(unsent)).conversationUrl, null);
+});

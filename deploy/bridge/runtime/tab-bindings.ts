@@ -109,9 +109,14 @@ export class TabBindings {
     const url = new URL(page.url());
     if (url.origin !== new URL(this.startUrl).origin) throw new Error('Chat tab left the configured platform');
     if (binding.conversationUrl) {
-      if (this.conversation(page.url()) !== binding.conversationUrl) throw new Error('Chat tab navigated to a different conversation');
+      if (this.conversation(url.href) !== binding.conversationUrl) throw new Error('Chat tab navigated to a different conversation');
     } else if (url.pathname !== new URL(this.startUrl).pathname) {
-      throw new Error('Unbound tab changed before its first confirmed send');
+      // The first URL can appear after captureConversation read the home URL.
+      // Bind this same target from one URL snapshot only after persisted send intent.
+      const conversationUrl = this.conversation(url.href);
+      if (!binding.hasSent || !conversationUrl) throw new Error('Unbound tab changed before its first confirmed send');
+      binding.conversationUrl = conversationUrl;
+      await this.save(binding); // Includes the cross-chat exclusivity check.
     }
   }
   async beforeSend(key: string, page: Page) {
