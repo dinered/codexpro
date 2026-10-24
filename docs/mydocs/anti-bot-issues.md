@@ -4,13 +4,11 @@
 Все пункты П-6-совместимы: детектировать сопротивление и останавливаться, не обходить.
 Порядок работ: У-1 → У-2 → У-3 → У-4…У-7 одним коммитом.
 
-> Deploy-ключ не открывает Issues API (проверено: 403), поэтому объекты ишью
-> создаёт владелец по ссылкам ниже (title предзаполнен, тело — из блока ишью)
-> или любым PAT с правом Issues:write.
+> Объекты ишью созданы в GitHub через API (fine-grained PAT, Issues:write) 2026-10-25.
 
 ## У-1 — Детектор сопротивления: кандидаты селекторов капчи + редирект на логин
 
-Приоритет: **высокий** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-1%29%20%D0%94%D0%B5%D1%82%D0%B5%D0%BA%D1%82%D0%BE%D1%80%20%D1%81%D0%BE%D0%BF%D1%80%D0%BE%D1%82%D0%B8%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A%20%D0%BA%D0%B0%D0%BD%D0%B4%D0%B8%D0%B4%D0%B0%D1%82%D1%8B%20%D1%81%D0%B5%D0%BB%D0%B5%D0%BA%D1%82%D0%BE%D1%80%D0%BE%D0%B2%20%D0%BA%D0%B0%D0%BF%D1%87%D0%B8%20%2B%20%D1%80%D0%B5%D0%B4%D0%B8%D1%80%D0%B5%D0%BA%D1%82%20%D0%BD%D0%B0%20%D0%BB%D0%BE%D0%B3%D0%B8%D0%BD)
+Приоритет: **высокий** · [ишью #1](https://github.com/dinered/codexpro/issues/1)
 
 <!-- тело ишью: скопировать блок ниже -->
 
@@ -29,7 +27,7 @@
 
 ## У-2 — NetworkProbe: сигналы сопротивления 403/429 → остановка моста
 
-Приоритет: **высокий** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-2%29%20NetworkProbe%3A%20%D1%81%D0%B8%D0%B3%D0%BD%D0%B0%D0%BB%D1%8B%20%D1%81%D0%BE%D0%BF%D1%80%D0%BE%D1%82%D0%B8%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%20403/429%20%E2%86%92%20%D0%BE%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0%20%D0%BC%D0%BE%D1%81%D1%82%D0%B0)
+Приоритет: **высокий** · [ишью #2](https://github.com/dinered/codexpro/issues/2)
 
 <!-- тело ишью: скопировать блок ниже -->
 
@@ -45,7 +43,7 @@
 
 ## У-3 — Опциональный порционный ввод (BRIDGE_INPUT_MODE=instant|chunks)
 
-Приоритет: **средний** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-3%29%20%D0%9E%D0%BF%D1%86%D0%B8%D0%BE%D0%BD%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9%20%D0%BF%D0%BE%D1%80%D1%86%D0%B8%D0%BE%D0%BD%D0%BD%D1%8B%D0%B9%20%D0%B2%D0%B2%D0%BE%D0%B4%20%28BRIDGE_INPUT_MODE%3Dinstant%7Cchunks%29)
+Приоритет: **средний** · [ишью #3](https://github.com/dinered/codexpro/issues/3)
 
 <!-- тело ишью: скопировать блок ниже -->
 
@@ -63,7 +61,7 @@
 
 ## У-4 — stopGeneration: обычный click вместо force:true
 
-Приоритет: **низкий** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-4%29%20stopGeneration%3A%20%D0%BE%D0%B1%D1%8B%D1%87%D0%BD%D1%8B%D0%B9%20click%20%D0%B2%D0%BC%D0%B5%D1%81%D1%82%D0%BE%20force%3Atrue)
+Приоритет: **низкий** · [ишью #4](https://github.com/dinered/codexpro/issues/4)
 
 <!-- тело ишью: скопировать блок ниже -->
 
@@ -77,7 +75,7 @@
 
 ## У-5 — README: правила запуска Chrome + раздел «Что видит платформа»
 
-Приоритет: **низкий** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-5%29%20README%3A%20%D0%BF%D1%80%D0%B0%D0%B2%D0%B8%D0%BB%D0%B0%20%D0%B7%D0%B0%D0%BF%D1%83%D1%81%D0%BA%D0%B0%20Chrome%20%2B%20%D1%80%D0%B0%D0%B7%D0%B4%D0%B5%D0%BB%20%C2%AB%D0%A7%D1%82%D0%BE%20%D0%B2%D0%B8%D0%B4%D0%B8%D1%82%20%D0%BF%D0%BB%D0%B0%D1%82%D1%84%D0%BE%D1%80%D0%BC%D0%B0%C2%BB)
+Приоритет: **низкий** · [ишью #5](https://github.com/dinered/codexpro/issues/5)
 
 <!-- тело ишью: скопировать блок ниже -->
 
@@ -94,7 +92,7 @@
 
 ## У-6 — Метрики сопротивления: счётчики challenge / rateLimit / backoff
 
-Приоритет: **низкий** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-6%29%20%D0%9C%D0%B5%D1%82%D1%80%D0%B8%D0%BA%D0%B8%20%D1%81%D0%BE%D0%BF%D1%80%D0%BE%D1%82%D0%B8%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A%20%D1%81%D1%87%D1%91%D1%82%D1%87%D0%B8%D0%BA%D0%B8%20challenge%20/%20rateLimit%20/%20backoff)
+Приоритет: **низкий** · [ишью #6](https://github.com/dinered/codexpro/issues/6)
 
 <!-- тело ишью: скопировать блок ниже -->
 
@@ -108,7 +106,7 @@
 
 ## У-7 — Гигиена: Pacer.snapshot().backoffUntilMs всегда null
 
-Приоритет: **гигиена** · [создать ишью](https://github.com/dinered/codexpro/issues/new?title=%28%D0%A3-7%29%20%D0%93%D0%B8%D0%B3%D0%B8%D0%B5%D0%BD%D0%B0%3A%20Pacer.snapshot%28%29.backoffUntilMs%20%D0%B2%D1%81%D0%B5%D0%B3%D0%B4%D0%B0%20null)
+Приоритет: **гигиена** · [ишью #7](https://github.com/dinered/codexpro/issues/7)
 
 <!-- тело ишью: скопировать блок ниже -->
 
