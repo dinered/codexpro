@@ -21,8 +21,10 @@ require explicit operator resume. Keep its dedicated state and browser profile.
 The deployed target-image per-chat fixture, viewer/manual login, DE egress,
 provider/model discovery and shared ready heartbeat have passed. See
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for exact deployed identities.
-Login persistence across a browser restart and successful reply forwarding to Paseo remain
-unverified; the logged-in browser was deliberately kept running.
+One distinct authorized native message received a real reply in Paseo and
+completed after the router corrections. Login persistence across a browser
+restart remains unverified. These updates preserved the browser container ID
+and its existing restart count.
 Source CI is a smoke job; it does not perform these deployment checks. The local
 headless per-chat scenario already passed and should not be repeated as a
 substitute for target-image acceptance.

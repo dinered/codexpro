@@ -38,7 +38,8 @@ existing domain-matching operator tab is never selected as a fallback.
 Missing tabs reopen only the saved conversation, with no fresh-chat fallback
 when a previous send has an unresolved URL. Manual navigation to a different
 conversation blocks the next send. The saved state contains routing metadata,
-not browser credentials.
+not browser credentials. Inactive tabs are restored only when their chat has
+runnable work; an inactive stale tab cannot block an unrelated new chat at startup.
 
 One serial router shares a single Pacer across chats and calls one reference
 Bridge queue step at a time; the original journal/lease/cancel/result engine
@@ -55,7 +56,11 @@ The same per-chat scenario also passed on deployed Google Chrome Stable156;
 noVNC/manual login, DE egress and shared ready heartbeat are verified. Login
 persistence across a browser restart remains untested. Unit checks cover persistence, trace-matched
 results and refusal of cross-chat navigation. No real ChatGPT prompt is
-inferred from synthetic acceptance or plugin installation.
+inferred from synthetic acceptance or plugin installation. Separately, one
+distinct authorized native message received its real assistant reply in Paseo
+and completed with acknowledgement. The supported ordinary input path omitted
+agent provenance, and its exact task text was verified; general agent-message
+metadata filtering remains issue #6.
 
 ## Rollback
 
@@ -64,7 +69,7 @@ registry, journals, results and the original browser profile. Browser/manual
 viewer continue independently. No down-v, prune, unrelated service change or
 chat-state deletion.
 
-## Reproducible checks and pending live acceptance
+## Reproducible checks and live acceptance
 
 From the repository root, in the reviewed source:
 
@@ -72,7 +77,7 @@ From the repository root, in the reviewed source:
 npm --prefix deploy/bridge/paseo-plugin ci --ignore-scripts --no-audit --no-fund
 npm --prefix deploy/bridge/paseo-plugin test
 npm --prefix deploy/bridge/paseo-plugin run typecheck
-# BRIDGE_APP is an isolated reference copy with the three runtime overlays.
+# BRIDGE_APP is an isolated reference copy with the runtime overlays.
 BRIDGE_APP=/path/to/patched/app node --test deploy/bridge/tab-bindings.test.mjs deploy/bridge/provider-engine.test.mjs
 ```
 

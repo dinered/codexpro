@@ -117,13 +117,15 @@ sh deploy/bridge/check.sh
 ```
 
 The deployed Chrome Stable156 image and router have verified immutable image
-identity, healthy/running status, zero restarts and the reviewed state/port
-mappings. The existing Mac SSH route was restored and used for router startup.
+identity, healthy/running status and the reviewed state/port mappings. Browser
+has one earlier restart of unknown cause; the current router has zero restarts.
+Router replacements preserved the browser ID and restart count. The existing
+Mac SSH route was restored and used for router startup.
 
 The three real-Chrome lifecycle cases passed with the shutdown overlay: stop,
 startup error and synthetic challenge exit without submissions while preserving
-Chrome. The operator confirmed viewer input and manual login. Persistence of that login
-across a browser/container restart has not been tested; the browser was kept running.
+Chrome. The operator confirmed viewer input and manual login. Login persistence
+across a browser/container restart remains unverified.
 
 The prepared `per-chat-browser.test.mjs` passed in isolated local Chrome for
 Testing155.0.8059.12 (headless), against a loopback HTTP fixture. It ran four
@@ -142,8 +144,12 @@ passed without source or assertion changes. System packages stayed unchanged.
 The same per-chat scenario also passed against the deployed Chrome Stable156
 image: four loopback sends, cancellation without a send, isolation, router/session
 restart and closed-tab recovery. Native provider/model discovery, DE egress and
-the actual shared router heartbeat passed. Remaining checks are successful forwarding of the next
-operator-initiated ChatGPT response to Paseo and login persistence across a browser restart.
+the actual shared router heartbeat passed. After the URL-binding, inactive-tab
+startup and modern idle-control corrections, one distinct authorized native
+message received its real answer in Paseo and completed. Its task text contained
+only ordinary user input. Login persistence across a browser restart remains
+unverified; see the exact runtime and acceptance evidence in
+[DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md).
 `operator-fixture.mjs` uses container-loopback port8049, which stays unpublished.
 
 Do not use real ChatGPT prompts as smoke. Operator login is a separate manual
