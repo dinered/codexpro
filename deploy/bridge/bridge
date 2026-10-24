@@ -1,6 +1,3 @@
 #!/bin/sh
-# Opt-in bridge only. Never automatically restart after CAPTCHA/login/fatal.
-set -eu
-mkdir -p /data/spool /data/control
-cd /app
-exec flock -n -E 75 /data/control/bridge.lock node src/main.ts /data/spool
+# Compatibility entrypoint; all live deployment turns use stable per-chat bindings.
+exec /opt/bridge/router "$@"

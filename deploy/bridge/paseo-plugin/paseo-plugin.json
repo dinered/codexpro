@@ -1,0 +1,1 @@
+{"id":"codexpro-browser","description":"ChatGPT в постоянных вкладках Chrome, по одной на чат Paseo","requirements":{"paseo":">=0.12.0 <0.13.0"}}

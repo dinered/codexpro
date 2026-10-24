@@ -42,12 +42,14 @@ services:
     stop_grace_period: 30s
     mem_limit: 256m
     cpus: 0.2
-    command: ["/opt/bridge/bridge"]
+    command: ["/opt/bridge/router"]
     volumes:
-      - spool:/data
+      - type: bind
+        source: ${BRIDGE_STATE_HOST_DIR:-/opt/stacks/paseo-beta/paseo-home/.paseo/codexpro}
+        target: /data
+        bind: {create_host_path: false}
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
 volumes:
   profile:
-  spool:

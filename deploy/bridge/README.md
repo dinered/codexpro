@@ -66,10 +66,13 @@ in that variable or command-line URLs.
 
 ## Manual takeover and bridge lifecycle
 
-The reference is a protocol-v3 bridge plus a CLI client, not a registered Paseo
-provider plugin. Codex CLI and the upstream codexpro MCP server are not runtime
-dependencies. A compatible provider adapter or explicit CLI spool producer is
-needed for actual Paseo turns; do not connect the old protocol-v2 provider.
+The deployment includes a native Paseo0.12.x text provider candidate under
+`paseo-plugin/` and a serial protocol-v3 router under `runtime/`. See
+[provider-integration.md](provider-integration.md) for the exact dedicated shared
+state mapping, review gates and limitations. Every Paseo conversation retains
+its own ChatGPT tab/conversation binding. The original protocol-v2 provider
+stays unchanged and must not be connected to this router. Codex CLI and the
+upstream codexpro MCP server are not runtime dependencies.
 
 The bridge service is opt-in, has no automatic restart and holds an exclusive
 spool lock. First verify an empty dedicated spool and the same visible session;
@@ -143,7 +146,8 @@ docker compose --profile bridge stop bridge
 docker compose stop browser
 ```
 
-Keep `codexpro-reference_profile` and `codexpro-reference_spool` volumes; never
+Keep `codexpro-reference_profile`, any earlier spool volume and the dedicated
+provider/router state bind; never
 use down-v/prune, remove profile locks/data, or downgrade Chrome on the same
 profile. No other container/volume is in scope. Inspect any current queue
 before restarting; reference journal/idempotency decisions remain unchanged.

@@ -1,0 +1,6 @@
+#!/bin/sh
+# One serial router, shared pacing window, no automatic resume after challenge.
+set -eu
+mkdir -p /data/control
+cd /app
+exec flock -n -E 75 /data/control/router.lock node deployment/router.ts

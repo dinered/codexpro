@@ -19,15 +19,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY docs/mydocs/z.ai/download/bridge-reference/ /app/
-COPY deploy/bridge/read-page.patch deploy/bridge/shutdown.patch /tmp/
+COPY deploy/bridge/read-page.patch deploy/bridge/shutdown.patch deploy/bridge/router-step.patch /tmp/
 RUN echo 'f3b28c68da9ff452e3180fab0075c4e6b4dff79003091e32b948f348c164e80a  src/driver/chatgpt.ts' | sha256sum -c - \
  && echo 'f7872f5d41d520e45125715a56172b93bdc1386d73767f1cdabfe2915bcd02d6  src/main.ts' | sha256sum -c - \
+ && echo '269c7039c26dba2a8d325353aa8075fb280cf68a0c6aa90502c207e045be1ee0  src/bridge/loop.ts' | sha256sum -c - \
  && patch --batch --fuzz=0 -p1 < /tmp/read-page.patch \
  && patch --batch --fuzz=0 -p1 < /tmp/shutdown.patch \
- && rm /tmp/read-page.patch /tmp/shutdown.patch \
+ && patch --batch --fuzz=0 -p1 < /tmp/router-step.patch \
+ && rm /tmp/read-page.patch /tmp/shutdown.patch /tmp/router-step.patch \
  && npm ci --ignore-scripts --omit=dev --no-audit --no-fund
-COPY deploy/bridge/supervise.py deploy/bridge/health.py deploy/bridge/bridge /opt/bridge/
-RUN chmod 755 /opt/bridge/bridge \
+COPY deploy/bridge/runtime/ /app/deployment/
+COPY deploy/bridge/supervise.py deploy/bridge/health.py deploy/bridge/bridge deploy/bridge/router /opt/bridge/
+RUN chmod 755 /opt/bridge/bridge /opt/bridge/router \
  && mkdir -p /home/node/profile /data/spool /data/control \
  && chown -R node:node /home/node/profile /data
 ENV DISPLAY=:0 PYTHONPATH=/opt/websockify BRIDGE_SPOOL=/data/spool \

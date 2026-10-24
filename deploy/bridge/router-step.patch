@@ -1,0 +1,10 @@
+--- a/src/bridge/loop.ts
++++ b/src/bridge/loop.ts
+@@ -75,0 +76,7 @@
++  /** One serial queue step for the deployment's per-conversation router. */
++  async runOnce(): Promise<BridgeResult> {
++    await mkdir(this.cfg.root, { recursive: true });
++    if (!this.deps.stop.stopped && !this.fatal) await this.step();
++    return { sentTotal: this.sentTotal, fatal: this.fatal };
++  }
++

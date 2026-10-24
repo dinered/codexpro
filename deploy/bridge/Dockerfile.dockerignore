@@ -8,3 +8,5 @@
 !deploy/
 !deploy/bridge/
 !deploy/bridge/**
+**/node_modules/
+**/.git/
