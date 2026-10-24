@@ -39,7 +39,6 @@ try {
   const pacer = new Pacer(base.pace, rand); // One pacing window shared by every Paseo chat.
   const profile = await loadPlatformProfile(base.selectorsPath);
   const bindings = new TabBindings(browser, join(root, 'bindings'), profile.start_url);
-  const known = new Set<string>();
   state = 'ready'; await heartbeat();
   while (!stop.stopped) {
     const entries = await readdir(join(root, 'registry')).catch(error => {
@@ -51,10 +50,11 @@ try {
       const registration = JSON.parse(await readFile(join(root, 'registry', name), 'utf8'));
       if (registration.v !== 1 || !validChatKey(registration.key) || name !== `${registration.key}.json`) throw new Error('Invalid chat registration');
       const key: string = registration.key;
-      if (!known.has(key)) { await bindings.page(key); known.add(key); }
       const spool = join(root, 'chats', key, 'spool');
       const pending = await scanQueue(spool);
       if (!pending.pending.length) continue;
+      // An inactive chat may have been navigated away by its operator. Restore
+      // and validate its tab only when it has work; all binding guards still run.
       const page = await bindings.page(key);
       await page.bringToFront();
       const driver = new BoundDriver(page, profile, bindings, key);

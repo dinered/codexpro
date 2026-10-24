@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createServer} from 'node:http';
-import {mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -10,6 +10,8 @@ import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 const app = process.env.BRIDGE_APP ?? '/app';
+const {loadPlatformProfile} = await import(pathToFileURL(join(app, 'src/driver/selectors.ts')));
+const deployedProfile = await loadPlatformProfile(join(app, 'selectors/chatgpt.yaml'));
 const {chromium} = await import(pathToFileURL(join(app, 'node_modules/playwright-core/index.mjs')));
 const providerSource = process.env.CODEXPRO_PROVIDER_SOURCE ?? resolve(import.meta.dirname, 'paseo-plugin/server/provider.ts');
 const {createProvider} = await import(pathToFileURL(providerSource));
@@ -31,14 +33,14 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
     const id = request.url?.match(/^\/c\/([a-zA-Z0-9_-]+)$/)?.[1];
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
     response.end(`<!doctype html><title>Local Paseo chat fixture</title><style>#composer{min-height:32px;border:1px solid}#stop[hidden]{display:none}</style>
-      <div id="turns"></div><div id="composer" contenteditable="true"></div><button id="send">Send</button><button id="stop" hidden>Stop</button>
+      <div id="turns"></div><div id="composer" contenteditable="true"></div><button id="send" aria-label="Send">Send</button><button id="stop" hidden>Stop</button>
       <script>
       let answers=${JSON.stringify(conversations.get(id) ?? [])};
       const turns=document.querySelector('#turns'),composer=document.querySelector('#composer'),stop=document.querySelector('#stop');
       function render(){turns.textContent='';for(const text of answers){const turn=document.createElement('div');turn.className='turn';const answer=document.createElement('p');answer.className='answer';answer.textContent=text;turn.append(answer);turns.append(turn);}}render();
       composer.addEventListener('keydown',async e=>{if(e.key!=='Enter'||e.shiftKey)return;e.preventDefault();stop.hidden=false;
         const data=await(await fetch('/message',{method:'POST',body:JSON.stringify({id:location.pathname.split('/c/')[1],text:composer.innerText})})).json();
-        history.replaceState({},'', '/c/'+data.id);answers=data.answers;render();composer.textContent='';stop.hidden=true;});
+        if(location.pathname==='/'){history.replaceState({},'', '/c/');setTimeout(()=>history.replaceState({},'', '/c/'+data.id),150);}else{history.replaceState({},'', '/c/'+data.id);}answers=data.answers;render();composer.textContent='';stop.hidden=true;});
       </script>`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -46,7 +48,7 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
   assert.equal(new URL(origin).hostname, '127.0.0.1');
   const profilePath = join(root, 'selectors.json');
   await writeFile(profilePath, JSON.stringify({platform: 'local-only', domain: origin, start_url: origin, network_probe: false,
-    selectors: {composer: '#composer', turn: '.turn', answer: '.answer', stop_button: '#stop', send_button: '#send'}}));
+    selectors: {composer: '#composer', turn: '.turn', answer: '.answer', stop_button: '#stop', send_button: deployedProfile.selectors.send_button}}));
   const cdp = process.env.BRIDGE_CDP_URL ?? 'http://127.0.0.1:9222';
   const browser = await chromium.connectOverCDP(cdp);
   let child, connection;
@@ -79,7 +81,7 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
     await connection.send({type: 'session.prompt', sessionId, prompt: {clientMessageId: text, delivery: 'auto', input: {type: 'message', content: [{type: 'text', text}]}}});
     await waitFor(() => events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === text));
     const result = events.find(e => e.type === 'session.prompt_result' && e.clientMessageId === text).result;
-    assert.equal(result.type, 'turn', JSON.stringify(result)); return result.turnId;
+    assert.equal(result.type, 'turn', JSON.stringify(result)+'\n'+output); return result.turnId;
   };
   const terminal = async (turnId, state) => { await waitFor(() => events.some(e => e.type === 'session.turn' && e.turnId === turnId && e.state !== 'started')); const result = events.find(e => e.type === 'session.turn' && e.turnId === turnId && e.state !== 'started'); assert.equal(result.state, state, JSON.stringify(result) + '\n' + output); };
   const binding = async key => JSON.parse(await readFile(join(root, 'bindings', `${key}.json`), 'utf8'));
@@ -97,6 +99,19 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
     child.kill('SIGCONT'); await terminal(canceled, 'canceled');
     assert.equal(records.some(record => record.text === 'A-canceled'), false);
     await stopRouter(); await connection.close();
+    // An inactive retained chat was navigated away by the operator. It must not
+    // block unrelated pending work or have its binding rewritten during restart.
+    const inactive = randomUUID(), inactivePage = await browser.contexts()[0].newPage();
+    await inactivePage.goto(origin);
+    const cdpSession = await inactivePage.context().newCDPSession(inactivePage);
+    const inactiveTarget = (await cdpSession.send('Target.getTargetInfo')).targetInfo.targetId;
+    await cdpSession.detach();
+    const inactiveBinding = {v:1,key:inactive,targetId:inactiveTarget,conversationUrl:origin+'c/retained-inactive',hasSent:true};
+    await writeFile(join(root,'bindings',inactive+'.json'),JSON.stringify(inactiveBinding));
+    await mkdir(join(root,'chats',inactive,'spool'),{recursive:true});
+    await writeFile(join(root,'registry',inactive+'.json'),JSON.stringify({v:1,key:inactive}));
+    const validInactive=process.env.CODEXPRO_FIXTURE_VALID_INACTIVE==='1';
+    if(validInactive)await inactivePage.goto(inactiveBinding.conversationUrl);
     await startRouter(); await connect(); await open('A-restored', a); await open('B-restored', b);
     await terminal(await submit('A-restored', 'A-next'), 'completed');
     assert.equal((await binding(a.data.chatKey)).targetId, ba.targetId);
@@ -109,7 +124,15 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
     const bIds = records.filter(record => record.text.startsWith('B-')).map(record => record.id);
     assert.equal(new Set(aIds).size, 1); assert.equal(new Set(bIds).size, 1); assert.notEqual(aIds[0], bIds[0]);
     assert.equal(records.length, 4);
-    console.log(JSON.stringify({root, syntheticSends: records.length, canceledWithoutSend: true, stableIndependentConversations: true, routerRestart: true, closedTabRecovery: true}));
+    assert.deepEqual(await binding(inactive),inactiveBinding);
+    assert.equal(inactivePage.url(),validInactive?inactiveBinding.conversationUrl:origin);
+    if(!validInactive){
+      await open('inactive-attempt',{version:1,data:{chatKey:inactive}});
+      await terminal(await submit('inactive-attempt','INACTIVE-MUST-NOT-SEND'),'failed');
+      assert.equal(records.some(record=>record.text==='INACTIVE-MUST-NOT-SEND'),false);
+      assert.deepEqual(await binding(inactive),inactiveBinding);
+    }
+    console.log(JSON.stringify({root, syntheticSends: records.length, canceledWithoutSend: true, stableIndependentConversations: true, routerRestart: true, closedTabRecovery: true, inactiveBindingPreserved: true, stalePendingRefusedWithoutSend: !validInactive}));
   } finally {
     child?.kill('SIGCONT');
     await stopRouter().catch(() => { child?.kill('SIGKILL'); });
