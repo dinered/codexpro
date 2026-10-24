@@ -105,3 +105,65 @@ test('first conversation URL arriving between capture and assertion is saved onc
   assert.equal((await bindings.read(unsent)).hasSent, false);
   assert.equal((await bindings.read(unsent)).conversationUrl, null);
 });
+
+test('post-send transient path settles before the first conversation claim; persistent foreign paths still fail', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tab-url-settling-'));
+  const f = browserFixture(), key = randomUUID();
+  const bindings = new TabBindings(f.browser, root, 'https://chatgpt.com/');
+  const page = await bindings.page(key); await bindings.beforeSend(key, page);
+  page.current = 'https://chatgpt.com/c/';
+  const navigation = setTimeout(() => { page.current = 'https://chatgpt.com/c/settled'; }, 100);
+  try { await bindings.assertPage(key, page); } finally { clearTimeout(navigation); }
+  assert.equal((await bindings.read(key)).conversationUrl, 'https://chatgpt.com/c/settled');
+  page.current = 'https://chatgpt.com/c/foreign';
+  await assert.rejects(bindings.assertPage(key, page), /different conversation/);
+  const another = randomUUID(), unbound = await bindings.page(another);
+  await bindings.beforeSend(another, unbound);
+  unbound.current = 'https://chatgpt.com/settings';
+  await assert.rejects(bindings.assertPage(another, unbound), /before its first confirmed send/);
+  assert.equal((await bindings.read(another)).conversationUrl, null);
+  unbound.current = 'https://foreign.invalid/c/other';
+  await assert.rejects(bindings.assertPage(another, unbound), /left the configured platform/);
+});
+
+test('target and origin changes while settling cannot claim a first conversation', async () => {
+  for (const change of ['target', 'origin']) {
+    const root = await mkdtemp(join(tmpdir(), `tab-settling-${change}-`));
+    const f = browserFixture(), key = randomUUID();
+    const bindings = new TabBindings(f.browser, root, 'https://chatgpt.com/');
+    const page = await bindings.page(key);
+    await bindings.beforeSend(key, page);
+    const original = await bindings.read(key);
+    page.current = 'https://chatgpt.com/c/';
+    let snapshots = 0;
+    page.url = () => {
+      const url = page.current;
+      if (++snapshots === 1) queueMicrotask(() => {
+        if (change === 'target') page.id = 'different-target';
+        page.current = change === 'target' ? 'https://chatgpt.com/c/unclaimed' : 'https://foreign.invalid/c/unclaimed';
+      });
+      return url;
+    };
+    await assert.rejects(bindings.assertPage(key, page), change === 'target' ? /identity changed/ : /left the configured platform/);
+    assert.deepEqual(await bindings.read(key), original);
+    assert.equal(snapshots, change === 'target' ? 1 : 2);
+  }
+});
+
+test('auth/challenge paths and unsent transient paths reject without a settling delay', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'tab-settling-immediate-'));
+  const f = browserFixture(), key = randomUUID(), unsent = randomUUID();
+  const bindings = new TabBindings(f.browser, root, 'https://chatgpt.com/');
+  const page = await bindings.page(key), fresh = await bindings.page(unsent);
+  await bindings.beforeSend(key, page);
+  t.mock.method(globalThis, 'setTimeout', () => { assert.fail('Rejected navigation must not enter the settling delay'); });
+  for (const path of ['/auth/login', '/login', '/challenge/verify']) {
+    page.current = `https://chatgpt.com${path}`;
+    await assert.rejects(bindings.assertPage(key, page), /before its first confirmed send/);
+    assert.equal((await bindings.read(key)).conversationUrl, null);
+  }
+  fresh.current = 'https://chatgpt.com/c/';
+  await assert.rejects(bindings.assertPage(unsent, fresh), /before its first confirmed send/);
+  assert.equal((await bindings.read(unsent)).hasSent, false);
+  assert.equal((await bindings.read(unsent)).conversationUrl, null);
+});

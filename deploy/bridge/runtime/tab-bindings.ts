@@ -104,19 +104,33 @@ export class TabBindings {
     }
   }
   async assertPage(key: string, page: Page) {
-    const binding = await this.read(key);
-    if (!binding || page.isClosed() || await this.target(page) !== binding.targetId) throw new Error('Chat tab identity changed');
-    const url = new URL(page.url());
-    if (url.origin !== new URL(this.startUrl).origin) throw new Error('Chat tab left the configured platform');
-    if (binding.conversationUrl) {
-      if (this.conversation(url.href) !== binding.conversationUrl) throw new Error('Chat tab navigated to a different conversation');
-    } else if (url.pathname !== new URL(this.startUrl).pathname) {
-      // The first URL can appear after captureConversation read the home URL.
-      // Bind this same target from one URL snapshot only after persisted send intent.
+    const deadline = Date.now() + 2000;
+    for (;;) {
+      const binding = await this.read(key);
+      if (!binding || page.isClosed() || await this.target(page) !== binding.targetId) throw new Error('Chat tab identity changed');
+      const url = new URL(page.url());
+      if (url.origin !== new URL(this.startUrl).origin) throw new Error('Chat tab left the configured platform');
+      if (binding.conversationUrl) {
+        if (this.conversation(url.href) !== binding.conversationUrl) throw new Error('Chat tab navigated to a different conversation');
+        return;
+      }
+      if (url.pathname === new URL(this.startUrl).pathname) return;
       const conversationUrl = this.conversation(url.href);
-      if (!binding.hasSent || !conversationUrl) throw new Error('Unbound tab changed before its first confirmed send');
-      binding.conversationUrl = conversationUrl;
-      await this.save(binding); // Includes the cross-chat exclusivity check.
+      if (binding.hasSent && conversationUrl) {
+        binding.conversationUrl = conversationUrl;
+        await this.save(binding); // Includes cross-chat exclusivity; saved claims never change here.
+        return;
+      }
+      const blocked = /\/(?:auth|login|challenge)(?:\/|$)/.test(url.pathname);
+      // A SPA may expose an intermediate path after Enter. Wait without sending,
+      // rechecking target/origin each time; only home or a canonical conversation can pass.
+      if (binding.hasSent && !conversationUrl && !blocked && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
+      const pathKind = blocked ? 'login-or-challenge' : conversationUrl ? 'conversation' : /^\/c\/?$/.test(url.pathname) ? 'conversation-root' : 'other';
+      console.error('Chat binding rejected:', JSON.stringify({source: 'url-settle-v1', hasSent: binding.hasSent, pathKind, targetMatch: true, originMatch: true}));
+      throw new Error('Unbound tab changed before its first confirmed send');
     }
   }
   async beforeSend(key: string, page: Page) {

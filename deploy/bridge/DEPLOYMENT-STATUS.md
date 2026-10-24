@@ -1,12 +1,13 @@
 # Verified deployment — 2026-10-24
 
-Browser and router are running on VM108; native provider `codexpro-browser`
+Browser and router were last verified running on VM108; native provider `codexpro-browser`
 is available in Paseo as **ChatGPT (Chrome)**, model `chatgpt`. A new Paseo
 conversation receives its own persistent Chrome tab. The operator completed
 manual ChatGPT login. Synthetic acceptance submitted no real ChatGPT prompts. The first operator
 message received a reply in Chrome, but exposed a URL-binding race before
-forwarding to Paseo. The router fix is deployed; forwarding the next operator
-message remains to be verified. The original message was not replayed.
+forwarding to Paseo. The first router fix is deployed, but a clean-chat message
+subsequently hit the same guard. End-to-end forwarding remains unaccepted.
+The original messages were not replayed.
 
 - Browser source: `e04c76b0f607c9dbf145b648c38893e1a243857b`.
 - Browser image: `sha256:a36ac8dc2761da676ed9823559b4a5fdd9b0fbfd4dcb7d1c2b69ee1a2d9cc90b`.
@@ -33,6 +34,29 @@ transition delay passed. Failed task/result/journal files were retained unchange
 
 A browser restart after manual login has not been performed. Persistent volume
 configuration and tab recovery do not prove authentication survives that restart.
+
+## Prepared correction; deployment pending
+
+The candidate includes the exact `Send` button-label alias and a bounded first-URL
+settling wait: up to two seconds after persisted send intent, with target and
+origin checked on every sample. Only the home page or an exclusively claimed
+canonical conversation may pass. Existing conversation bindings remain immutable;
+login/challenge paths and unsent transitions fail immediately. Rejection diagnostics
+contain reason flags, without conversation URLs or message contents.
+
+Eleven binding/selector tests and deployment TypeScript checking pass. A fresh
+local Chromium fixture passes four synthetic sends across two chats, cancellation
+without sending, router restart and closed-tab recovery, including an intermediate
+`/c/` path on the first send. This reproduces a possible failure mechanism; the
+live failure-time path was not captured and its cause remains unconfirmed.
+
+The combined candidate has not been built or activated on VM108. Existing Mac SSH
+access is unavailable; direct SSH lacks established host trust. The repeatable
+prepare-only helper and validation evidence are retained in the First Mate record
+directory. Actual immutable image/configuration review and target Chrome acceptance
+must precede router replacement. The deployed revision/images listed above remain
+the last verified identities. Browser/login/state and the paused packaging
+alternative are preserved.
 
 ## Manual takeover and restart behavior
 
