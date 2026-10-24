@@ -1,0 +1,23 @@
+# Селекторы web ChatGPT — единственное место, привязанное к вёрстке платформы.
+# При смене вёрстки правится этот файл, пересборка не нужна (birdview §6).
+# Версия разметки: 2026-10. Кнопки — списком кандидатов через запятую (CSS «или»):
+# подпись RU и EN + data-testid; мост считает найденным первый ВИДИМый кандидат,
+# поэтому язык интерфейса и косметические смены вёрстки не ломают мост (Д-5).
+platform: chatgpt
+domain: "https://chatgpt.com/"
+start_url: "https://chatgpt.com/"
+# Сетевой стрим как дополнительный сигнал конца ответа (birdview §3, «усиление»).
+# Включать только когда эндпоинты платформы проверены и стабильны.
+network_probe: false
+selectors:
+  # обязательные — без них самопроверка на старте не пускает мост
+  composer: '[data-composer-input] [contenteditable="true"]'
+  turn: "[data-turn-key]"
+  answer: '[data-markdown-text-style="assistant-message"]:not([data-markdown-text-tone="tertiary"])'
+  stop_button: 'button[aria-label="Остановить"], button[aria-label="Stop generating"], button[data-testid="stop-button"]'
+  # необязательные — уточняют признаки конца ответа и диагностику (Ф-6)
+  streaming: "[data-markdown-animated]"
+  send_button: 'button[data-testid="send-button"], button[aria-label="Отправить"], button[aria-label="Send prompt"]'
+  regenerate: 'button[aria-label="Сгенерировать ответ заново"], button[aria-label="Regenerate"], button[data-testid="regenerate"]'
+  user_bubble: "[data-user-message-bubble]"
+  challenge: '[data-testid="challenge"]'
