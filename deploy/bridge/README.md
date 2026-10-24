@@ -39,6 +39,10 @@ the exact reviewed Git SHA as `BRIDGE_IMAGE_TAG`; `docker compose` requires it.
 Only this pilot may be touched. A 1.5GiB total/1CPU cap is an estimate from the
 resource audit, not capacity certification; avoid simultaneous OmO pilots.
 Keep image/build/profile footprint within 4GiB and guest free disk above 10GiB.
+Check physical PVE MemAvailable before and during acceptance; keep at least
+3GiB available and stop only this pilot if the reserve drops below that floor
+or sustained memory pressure/degradation appears. Guest free memory alone
+does not establish physical-host capacity.
 
 ```sh
 cd deploy/bridge
@@ -47,7 +51,7 @@ docker compose config --quiet
 docker compose build browser
 # Record immutable image ID and installed Chrome/Node versions before startup.
 # First Mate reviews concrete config/image before the next command.
-docker compose up -d browser
+docker compose up -d --no-build --pull never --wait --wait-timeout 50 browser
 docker compose ps
 docker compose exec -T browser python3 /opt/bridge/health.py
 ```
@@ -104,9 +108,26 @@ require the live checks below; a passing source suite does not establish them.
 sh deploy/bridge/check.sh
 ```
 
-Planned live acceptance after review: browser health, loopback-only bindings,
+The reviewed image built successfully and the initial browser reached healthy
+with zero restarts. It was then stopped cleanly (exit0, no OOM) because physical
+PVE MemAvailable fell below the 3GiB acceptance floor; the new image and profile
+are retained. The immediate manual readiness probe ran before CDP was listening;
+Docker health passed once startup completed. There is no completed noVNC,
+session-persistence or bridge-lifecycle acceptance yet.
+
+Planned live acceptance after capacity recovers and review: browser health, loopback-only bindings,
 same local fixture/tab through CDP and noVNC, dedicated-profile persistence
 across a controlled browser restart, manual stop/resume with no task loops.
+`lifecycle.test.mjs` is a pending local-fixture regression for operator stop,
+startup error and synthetic challenge; it verifies process exit, zero submissions
+and survival of the separately launched Chrome. Run it inside the reviewed
+browser container with Node after capacity is available. `operator-fixture.mjs`
+provides the local page for noVNC/CDP input identity and profile persistence:
+run its `serve` mode, then `set`, restart only this browser, restart the fixture
+server, then use `check`. Fixture origin is container-loopback port8049; it is
+never published. These helpers are prepared, syntax checked and have not yet
+run against Chrome.
+
 Do not use real ChatGPT prompts as smoke. Operator login is a separate manual
 step, not synthetic-test evidence.
 
