@@ -1,0 +1,41 @@
+diff --git a/src/driver/chatgpt.ts b/src/driver/chatgpt.ts
+index 68a2976..3050150 100755
+--- a/src/driver/chatgpt.ts
++++ b/src/driver/chatgpt.ts
+@@ -129,12 +129,19 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
+   // признак генерации — только ВИДИМЫЙ индикатор: спрятанный, но присутствующий
+   // в DOM «Стоп» не должен держать busy вечно до тайм-аута хода (Ф-6, birdview §3)
+   const busy = visibleIn(sel.stop_button) || !!(sel.streaming && visibleIn(sel.streaming));
++  const composer = document.querySelector(sel.composer);
++  const composerText = composer && ("value" in composer ? String(composer.value ?? "") : composer.textContent ?? "");
++  const emptyComposer = !!composer && isVisible(composer) && !composerText?.trim();
++  const hasAnswer = !!last && [...last.querySelectorAll(sel.answer)].some(el => !!el.textContent?.trim());
+   const sendIdle = sel.send_button
+-    ? // холостое состояние — видимая и активная кнопка; спрятанная холостым не считается
+-      [...document.querySelectorAll(sel.send_button)].some(
+-        (button) => isVisible(button) && !(button as HTMLButtonElement).disabled,
+-      )
++    ? enabledVisible(sel.send_button) || (emptyComposer && hasAnswer && enabledVisible(sel.idle_button))
+     : true;
++
++  function enabledVisible(selector: string | undefined): boolean {
++    return !!selector && [...document.querySelectorAll(selector)].some(
++      (button) => isVisible(button) && !(button as HTMLButtonElement).disabled,
++    );
++  }
+   return { html, busy, sendIdle };
+ 
+   function visibleIn(selector: string): boolean {
+diff --git a/src/driver/selectors.ts b/src/driver/selectors.ts
+index 02407e4..d881450 100755
+--- a/src/driver/selectors.ts
++++ b/src/driver/selectors.ts
+@@ -18,6 +18,8 @@ export interface PlatformProfile {
+     stop_button: string;
+     streaming?: string;
+     send_button?: string;
++    /** Known ready control shown instead of Send only while the composer is empty. */
++    idle_button?: string;
+     regenerate?: string;
+     user_bubble?: string;
+     challenge?: string;
