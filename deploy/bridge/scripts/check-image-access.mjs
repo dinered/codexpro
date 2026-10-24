@@ -36,8 +36,10 @@ function run(command, args) {
 }
 run('/bin/sh', ['-n', '/opt/bridge/bridge']);
 run('/bin/sh', ['-n', '/opt/bridge/router']);
+// Upstream websockify.py is a symlink to the shell launcher named run.
+run('/bin/sh', ['-n', '/opt/websockify/websockify.py']);
 run('python3', ['-B', '-c', `import ast, pathlib, websockify
-for root in ('/opt/bridge', '/opt/websockify'):
+for root in ('/opt/bridge', '/opt/websockify/websockify'):
     for path in pathlib.Path(root).rglob('*.py'):
         ast.parse(path.read_text(), filename=str(path))
 `]);
