@@ -29,6 +29,8 @@ discussion-sync-cli-test:
     - sh -n tools/discussion-sync/bootstrap-cli.sh
     - sh tools/discussion-sync/bootstrap-cli.sh --self-test
     - DISCUSSION_SYNC_BIN_DIR="$CI_PROJECT_DIR/.ci-tools/bin" sh tools/discussion-sync/bootstrap-cli.sh --run sh -ec 'gh --version | grep -F "gh version 2.103.2"; glab --version | grep -F "glab 1.103.0"'
+    - sh -n tools/discussion-sync/with-glab-protocol.sh
+    - perl tools/discussion-sync/glab-protocol.test.pl "$CI_PROJECT_DIR/.ci-tools/bin/glab" gitlab.home.arpa
 # Все heads/tags; явное включение после review и первого проверенного запуска.
 sync-github:
   stage: deploy
@@ -56,4 +58,4 @@ discussion-sync:
     SYNC_RUNNER_TAG: merge-train-smoke
     DISCUSSION_SYNC_APPLY: "0"
   script:
-    - if [ "$DISCUSSION_SYNC_APPLY" = "1" ]; then sh tools/discussion-sync/bootstrap-cli.sh --run perl tools/discussion-sync/sync.pl --apply; else sh tools/discussion-sync/bootstrap-cli.sh --run perl tools/discussion-sync/sync.pl; fi
+    - if [ "$DISCUSSION_SYNC_APPLY" = "1" ]; then sh tools/discussion-sync/bootstrap-cli.sh --run sh tools/discussion-sync/with-glab-protocol.sh "$CI_SERVER_FQDN" "$CI_SERVER_PROTOCOL" perl tools/discussion-sync/sync.pl --apply; else sh tools/discussion-sync/bootstrap-cli.sh --run sh tools/discussion-sync/with-glab-protocol.sh "$CI_SERVER_FQDN" "$CI_SERVER_PROTOCOL" perl tools/discussion-sync/sync.pl; fi
