@@ -20,7 +20,10 @@ pointer входят в Git; остальные данные требуют от
 ## Алгоритм и гарантии
 
 1. Полный fetch пользовательских веток и тегов обеих сторон в новый bare repo.
-   Список полученных refs должен совпасть с исходным `ls-remote`.
+   Зарезервированная GitLab import-ветка `refs/heads/codexpro-sync/github-main-import`
+   проверяется отдельно и исключается из пользовательского inventory. Такой ref на
+   GitHub считается ошибкой. Список остальных полученных refs должен совпасть с
+   исходным `ls-remote`.
 2. Общий план по объединению refs обеих сторон:
 
    | Состояние ref | Действие |
@@ -31,6 +34,25 @@ pointer входят в Git; остальные данные требуют от
    | Ветки разошлись | Ошибка до первого push |
    | Одноимённые теги имеют разные object ID | Ошибка до первого push |
 
+   Исключение для GitLab `main`: если GitHub `main` впереди, вместо push в
+   защищённый `main` скрипт обновляет зарезервированную import-ветку и создаёт
+   обычный MR в `main`. Branch updates используют FF/CAS. Существующий открытый MR
+   переиспользуется; новый MR создаётся push options для первого ref или API для
+   уже существующей ветки без открытого MR. Импортная ветка не входит в общий
+   inventory и остаётся на GitLab после merge. При создании новой import-ветки
+   используются [документированные push options GitLab](https://docs.gitlab.com/topics/git/commit/#push-options-for-merge-requests)
+   `merge_request.create`, `merge_request.target=main` и фиксированный title. После
+   создания API явно выставляет `remove_source_branch=false` и проверяет, что
+   проект не принудительно удаляет source branch. Перед каждым запуском
+   проверяется открытый MR для source/target: повторный push не
+   передаёт `merge_request.create`, потому что это option создания нового MR, а не
+   update существующего. Если import-ветка осталась после закрытого MR, API создаёт
+   новый MR после FF/CAS с `remove_source_branch=false` через
+   [Merge requests API](https://docs.gitlab.com/api/merge_requests/); повторный
+   запуск видит уже открытый MR и использует его.
+   До merge GitLab `main` намеренно отстаёт; job явно сообщает ожидание MR, не
+   выдаёт это за равенство `main`.
+
    Annotated tags сравниваются по ID объекта тега, даже если целевой commit один.
    Ни конфликтующие теги, ни ветки автоматически не сводятся.
 3. Перед публикацией всех новых объектов — ограниченный поиск известных форматов
@@ -40,7 +62,8 @@ pointer входят в Git; остальные данные требуют от
    истории ответственным за review. Не выводите потенциальные значения в журнал.
 4. Повторная сверка обоих полных списков refs перед записью. Изменение источника,
    новая ветка или удаление требуют нового плана.
-5. Один `git push --atomic` на сторону; сначала GitLab, затем GitHub. Для каждого
+5. Один `git push --atomic` на сторону для обычных refs; import-ветка GitLab
+   публикуется отдельным atomic push. Для каждого
    обновления — `--force-with-lease=<ref>:<expected-id>` как проверка ожидаемого
    значения (CAS). Перед этим независимо проверяется ancestry: допустимы только
    создание и fast-forward веток. Для существующих тегов push отсутствует.
@@ -69,8 +92,11 @@ fast-forward не откатываются. Устраните причину о
 Источники запуска — только `schedule` и `web` на защищённой default-ветке `main`.
 Входящий CI push в GitLab дополнительно передаёт `ci.skip`.
 
-**Поставка кода не включает автоматизацию.** Для появления deploy job нужны
-`FULL_REPO_SYNC_ENABLED=true`, обе переменные токенов и защищённый `main`.
+**Поставка кода не включает автоматизацию.** Для запуска deploy job нужны
+`FULL_REPO_SYNC_ENABLED=true` и защищённый `main`. Если `GITLAB_SYNC_TOKEN` или
+`GITHUB_SYNC_TOKEN` отсутствует, job теперь запускается и завершается до любого
+Git fetch, называя только отсутствующие ключи. Значения, environment и trace не
+выводятся.
 `SYNC_APPLY` по умолчанию `0`: даже появившийся job сначала выполняет dry-run.
 Зелёный dry-run подтверждает построение плана, а не синхронизацию.
 
@@ -79,10 +105,11 @@ fast-forward не откатываются. Устраните причину о
 
 1. Проверяет существующие credentials и разрешённые protected branches/tags в
    [Settings → Repository](http://gitlab.home.arpa/ai-company/codexpro/-/settings/repository).
-   GitLab credential должен читать репозиторий и создавать/fast-forward обновлять
-   нужные refs; для заметок в Issue #4 нужен также API-доступ. Текущая защита `main`
-   может запрещать такой push — это отдельный реальный gate, требующий решения
-   оператора. Изменение роли/защиты не входит в установку скрипта.
+   GitLab credential должен читать репозиторий, создавать/fast-forward обновлять
+   обычные ветки и import-ветку, а также иметь API-доступ для чтения/создания MR и
+   scoped reporting. Для GitLab `main` push credential не требуется: ветка
+   обновляется только обычным review/merge request. Текущую защиту `main` с
+   `push_access_levels: No one` сохраняем; скрипт не ослабляет её и не меняет роли.
 2. В [CI/CD → Variables](http://gitlab.home.arpa/ai-company/codexpro/-/settings/ci_cd)
    проверяет `GITLAB_SYNC_TOKEN` и `GITHUB_SYNC_TOKEN`: masked, protected, без
    expansion; значения не передаёт агенту и не публикует. GitHub — доступ к
@@ -94,11 +121,15 @@ fast-forward не откатываются. Устраните причину о
 3. После merge одобренной версии задаёт `FULL_REPO_SYNC_ENABLED=true` и запускает
    [Build → Pipelines → New pipeline](http://gitlab.home.arpa/ai-company/codexpro/-/pipelines/new),
    ref `main`, `SYNC_APPLY=0`. Проверяет план всех веток/тегов и исходящую историю.
-4. Один ручной запуск `main`, `SYNC_APPLY=1`; сохраняет URL pipeline/job,
-   success apply-job и оба итоговых списка refs с SHA в
-   [Issue #4](http://gitlab.home.arpa/ai-company/codexpro/-/issues/4).
-   При запрете push/ref или недоступности GitHub решает именно этот отказ;
-   отсутствие красной ошибки в другом job не заменяет приёмку.
+4. Один ручной запуск `main`, `SYNC_APPLY=1`. Для входящего обновления GitHub `main`
+   job создаёт/обновляет MR из `codexpro-sync/github-main-import` в GitLab `main`
+   и явно сообщает, что ожидается обычное review и merge. Не включайте auto-merge и
+   не удаляйте source branch. После merge повторный запуск синхронизирует новый
+   GitLab `main` обратно на GitHub и проверяет равенство пользовательских refs.
+   Сохраняйте URL pipeline/job, точный SHA source MR, результат CI и итоговые
+   inventories с SHA в [Issue #4](http://gitlab.home.arpa/ai-company/codexpro/-/issues/4).
+   Успех синхронизации main наступает только после обычного merge и последующей
+   проверки обеих сторон; pending MR не является равенством.
 5. Только после успешного apply создаёт активное расписание
    [Build → Pipeline schedules](http://gitlab.home.arpa/ai-company/codexpro/-/pipeline_schedules):
    `sync-github`, cron `0 */3 * * *`, UTC, target `main`, variable `SYNC_APPLY=1`.

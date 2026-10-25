@@ -21,7 +21,7 @@ sync-github:
   stage: deploy
   tags: [$SYNC_RUNNER_TAG]
   rules:
-    - if: $FULL_REPO_SYNC_ENABLED == "true" && $CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE =~ /^(schedule|web)$/ && $GITHUB_SYNC_TOKEN && $GITLAB_SYNC_TOKEN
+    - if: $FULL_REPO_SYNC_ENABLED == "true" && $CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE =~ /^(schedule|web)$/
   resource_group: sync-github
   variables:
     SYNC_RUNNER_TAG: merge-train-smoke
