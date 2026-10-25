@@ -37,19 +37,18 @@ pointer входят в Git; остальные данные требуют от
    Исключение для GitLab `main`: если GitHub `main` впереди, вместо push в
    защищённый `main` скрипт обновляет зарезервированную import-ветку и создаёт
    обычный MR в `main`. Branch updates используют FF/CAS. Существующий открытый MR
-   переиспользуется; новый MR создаётся push options для первого ref или API для
-   уже существующей ветки без открытого MR. Импортная ветка не входит в общий
-   inventory и остаётся на GitLab после merge. При создании новой import-ветки
-   используются [документированные push options GitLab](https://docs.gitlab.com/topics/git/commit/#push-options-for-merge-requests)
-   `merge_request.create`, `merge_request.target=main` и фиксированный title. После
-   создания API явно выставляет `remove_source_branch=false` и проверяет, что
-   проект не принудительно удаляет source branch. Перед каждым запуском
-   проверяется открытый MR для source/target: повторный push не
-   передаёт `merge_request.create`, потому что это option создания нового MR, а не
-   update существующего. Если import-ветка осталась после закрытого MR, API создаёт
-   новый MR после FF/CAS с `remove_source_branch=false` через
-   [Merge requests API](https://docs.gitlab.com/api/merge_requests/); повторный
-   запуск видит уже открытый MR и использует его.
+   переиспользуется; новая import-ветка сначала публикуется отдельным FF/CAS push,
+   затем [Merge requests API](https://docs.gitlab.com/api/merge_requests/) создаёт
+   MR с `remove_source_branch=false`, независимо от project default. Для уже
+   открытого MR API перед проверкой retention явно отправляет PUT с
+   `remove_source_branch=false`; GitLab может вернуть `null` для этого поля после
+   явного PUT, поэтому null принимается только после успешного запроса и при
+   `force_remove_source_branch=false`. URL в отчёте строится из доверенного
+   `CI_PROJECT_URL` и числового IID ответа, а не из вложенного JSON `web_url`.
+   Push option `merge_request.create` не используется. Импортная ветка не входит в
+   общий inventory и остаётся на GitLab после merge. Если import-ветка осталась
+   после закрытого MR, API создаёт новый MR после FF/CAS; повторный запуск
+   переиспользует единственный открытый MR.
    До merge GitLab `main` намеренно отстаёт; job явно сообщает ожидание MR, не
    выдаёт это за равенство `main`.
 
@@ -60,6 +59,11 @@ pointer входят в Git; остальные данные требуют от
    останавливается до первого push. Это pattern-проверка, а не гарантия отсутствия
    секретов; перед первой внешней публикацией обязательна проверка всей исходящей
    истории ответственным за review. Не выводите потенциальные значения в журнал.
+   Исключение узко привязано к двум blob OID `1c6ebfd0d136f4d4a3ee94b944dbe501602e3743`
+   и `1af208bd6437ce625c9c4a9f0407ee90633303b6`: ответственный за review проверил,
+   что это опубликованные test fixtures с одним quoted dummy `BEGIN PRIVATE KEY`
+   маркером и без других совпадений. Все остальные OID, пути и шаблоны проверяются
+   обычно; fixture не даёт path-wide или pattern-wide исключения.
 4. Повторная сверка обоих полных списков refs перед записью. Изменение источника,
    новая ветка или удаление требуют нового плана.
 5. Один `git push --atomic` на сторону для обычных refs; import-ветка GitLab

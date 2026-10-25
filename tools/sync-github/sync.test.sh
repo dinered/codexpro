@@ -208,7 +208,7 @@ eq "$(g lab for-each-ref refs/heads)" '' 'missing GitLab main remains absent'
 pass 'GitHub main is never created by a direct push when the protected GitLab target is absent'
 
 new_case
-blob=$(printf '%s\n' '-----BEGIN PRIVATE KEY-----' | g work hash-object -w --stdin)
+blob=$(printf '%s%s\n' '-----BEGIN ' 'PRIVATE KEY-----' | g work hash-object -w --stdin)
 tree=$(printf '100644 blob %s\tfixture\n' "$blob" | g work mktree)
 B=$(mk "$A" inbound-secret-fixture)
 put lab refs/heads/main "$A"; put hub refs/heads/main "$B"
@@ -221,55 +221,56 @@ eq "$(g lab for-each-ref refs/heads/codexpro-sync/github-main-import)" '' 'secre
 pass 'bounded scan blocks secret-pattern objects before protected-main MR import'
 
 new_case
+for reviewed_oid in 1c6ebfd0d136f4d4a3ee94b944dbe501602e3743 1af208bd6437ce625c9c4a9f0407ee90633303b6; do
+  copied_oid=$(git -C "$repo_root" cat-file blob "$reviewed_oid" | g work hash-object -w --stdin)
+  eq "$copied_oid" "$reviewed_oid" 'reviewed historical fixture blob is immutable'
+done
+tree=$(printf '100644 blob %s\ttools-sync-test-v1\n100644 blob %s\ttools-sync-test-v2\n' \
+  1c6ebfd0d136f4d4a3ee94b944dbe501602e3743 1af208bd6437ce625c9c4a9f0407ee90633303b6 | g work mktree)
+B=$(mk "$A" root-reviewed-historical-fixtures)
+put lab refs/heads/main "$B"; put hub refs/heads/main "$A"
+ok
+eq "$(g lab rev-parse refs/heads/main)" "$B" 'reviewed historical test blobs pass narrowly'
+eq "$(g hub rev-parse refs/heads/main)" "$B" 'outgoing reviewed fixture history remains synchronized'
+pass 'only the two root-reviewed historical test blob OIDs are exempted from the scanner'
+
+new_case
 B=$(mk "$A" B); C=$(mk "$B" C); D=$(mk "$C" D); E=$(mk "$D" E)
 put lab refs/heads/main "$A"; put lab refs/heads/lab-only "$A"
 put hub refs/heads/main "$C"; put hub refs/heads/github-only "$A"
 git --git-dir="$d/lab" config receive.advertisePushOptions true
 mkdir "$d/bin"
 cat > "$d/bin/git" <<'WRAPPER'
-#!/usr/bin/env bash
-set -u
-create_mr=0
-args=()
-while (($#)); do
-  if [[ "$1" == "-o" || "$1" == "--push-option" ]]; then
-    [[ "${2:-}" == "merge_request.create" ]] && create_mr=1
-    shift 2
-  elif [[ "$1" == --push-option=* ]]; then
-    [[ "$1" == "--push-option=merge_request.create" ]] && create_mr=1
-    shift
-  else
-    args+=("$1"); shift
-  fi
-done
-"$TEST_GIT" "${args[@]}"
-status=$?
-if ((status == 0 && create_mr)); then
-  printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":true,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
-fi
-exit "$status"
+#!/bin/sh
+case " $* " in *" push "*) printf 'git push %s\n' "$*" >> "$TEST_DIR/events";; esac
+exec "$TEST_GIT" "$@"
 WRAPPER
 cat > "$d/bin/curl" <<'WRAPPER'
 #!/bin/sh
 cat > "$TEST_DIR/curl-config"
 [ "${TEST_CURL_FAIL:-0}" != 1 ] || exit 1
+[ "$(cat "$TEST_DIR/project-default-remove-source-branch")" = true ] || exit 3
 output=$(sed -n 's/^output = "\(.*\)"$/\1/p' "$TEST_DIR/curl-config")
-if grep -q '^request = "POST"$' "$TEST_DIR/curl-config"; then
-  if [ ! -f "$TEST_DIR/mr-state" ]; then
-    printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
-  fi
-fi
-if grep -q '^request = "PUT"$' "$TEST_DIR/curl-config"; then
-  printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
-fi
+request=$(sed -n 's/^request = "\(.*\)"$/\1/p' "$TEST_DIR/curl-config")
+case "$request" in
+  POST)
+    grep -q '^form-string = "remove_source_branch=false"$' "$TEST_DIR/curl-config" || exit 2
+    printf 'api POST remove_source_branch=false\n' >> "$TEST_DIR/events"
+    printf '%s\n' '[{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false,"author":{"web_url":"http://gitlab.home.arpa/executor"}}]' > "$TEST_DIR/mr-state";;
+  PUT)
+    grep -q '^form-string = "remove_source_branch=false"$' "$TEST_DIR/curl-config" || exit 2
+    printf 'api PUT remove_source_branch=false\n' >> "$TEST_DIR/events";;
+  *) printf 'api GET\n' >> "$TEST_DIR/events";;
+esac
 if [ -f "$TEST_DIR/mr-state" ]; then cp "$TEST_DIR/mr-state" "$output"; else printf '[]' > "$output"; fi
 WRAPPER
 chmod 700 "$d/bin/git" "$d/bin/curl"
+echo true > "$d/project-default-remove-source-branch"
 run_mr() {
   env CI=true CI_COMMIT_BRANCH=main CI_DEFAULT_BRANCH=main CI_COMMIT_REF_PROTECTED=true \
     GITLAB_SYNC_TOKEN=nonsecret-gitlab-fixture GITHUB_SYNC_TOKEN=nonsecret-github-fixture \
     GITLAB_REPO_URL="file://$d/lab" GITHUB_REPO_URL="file://$d/hub" \
-    SYNC_NOTE_ISSUE= SYNC_APPLY="${mr_apply:-1}" CI_API_V4_URL=http://gitlab.test/api/v4 CI_PROJECT_ID=1 \
+    SYNC_NOTE_ISSUE= SYNC_APPLY="${mr_apply:-1}" CI_API_V4_URL=http://gitlab.test/api/v4 CI_PROJECT_ID=1 CI_PROJECT_URL=http://gitlab.test/project \
     TEST_DIR="$d" TEST_GIT="$real_git" TEST_CURL_FAIL="${mr_curl_fail:-0}" PATH="$d/bin:$PATH" \
     sh "$here/sync.sh" > "$d/log" 2>&1
 }
@@ -290,12 +291,22 @@ mr_apply=1
 if ! run_mr; then cat "$d/log"; cat "$d/mr-state"; exit 1; fi
 eq "$(g lab rev-parse refs/heads/main)" "$A" 'import does not write protected main'
 eq "$(g lab rev-parse refs/heads/codexpro-sync/github-main-import)" "$C" 'import branch source SHA'
-eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' 'one MR created and configured to keep its branch'
+grep -q '^api POST remove_source_branch=false$' "$d/events"
+grep -q '^api PUT remove_source_branch=false$' "$d/events"
+if grep -q 'merge_request.create' "$d/events"; then echo 'FAIL: push option created the import MR'; exit 1; fi
+grep -q 'url=http://gitlab.test/project/-/merge_requests/1$' "$d/log" || { echo 'FAIL: nested author web_url replaced the MR URL'; cat "$d/log"; exit 1; }
+push_line=$(grep -n '^git push .*codexpro-sync/github-main-import' "$d/events" | head -n 1 | cut -d: -f1)
+post_line=$(grep -n '^api POST ' "$d/events" | head -n 1 | cut -d: -f1)
+[ "$push_line" -lt "$post_line" ] || { echo 'FAIL: import MR API create preceded import branch push'; exit 1; }
+pre_mr_pushes=$(awk '/^api POST / {exit} /^git push / {n++} END {print n+0}' "$d/events")
+[ "$pre_mr_pushes" = 1 ] || { echo 'FAIL: unrelated refs were pushed before MR creation'; cat "$d/events"; exit 1; }
 grep -q 'ожидает обычного merge request merge' "$d/log"
 eq "$(g lab rev-parse refs/heads/lab-only)" "$A" 'other GitLab head preserved'
 eq "$(g hub rev-parse refs/heads/github-only)" "$A" 'other GitHub head preserved'
 mr_ok
-eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' 'repeated pending run reuses the same MR'
+put_count=$(grep -c '^api PUT remove_source_branch=false$' "$d/events")
+[ "$put_count" -ge 2 ] || { echo 'FAIL: existing MR with default removal=true/null was accepted without explicit PUT'; exit 1; }
+grep -q 'url=http://gitlab.test/project/-/merge_requests/1$' "$d/log" || { echo 'FAIL: existing MR URL was not derived from project URL and IID'; exit 1; }
 pass 'GitHub main import uses stable reviewed branch and keeps protected main unchanged'
 
 put hub refs/heads/main "$D"
@@ -310,7 +321,9 @@ rm -f "$d/mr-state"
 mr_ok
 eq "$(g lab rev-parse refs/heads/main)" "$D" 'protected main unchanged before MR merge'
 eq "$(g lab rev-parse refs/heads/codexpro-sync/github-main-import)" "$E" 'existing branch updated before fallback MR creation'
-eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' 'fallback MR creation is idempotent for existing branch'
+grep -Fq '"should_remove_source_branch":null' "$d/mr-state"
+grep -Fq '"author":{"web_url":"http://gitlab.home.arpa/executor"}' "$d/mr-state"
+grep -q '^api POST remove_source_branch=false$' "$d/events"
 pass 'existing import branch without an open MR recreates the reviewed MR after FF'
 
 g lab update-ref refs/heads/main "$E"

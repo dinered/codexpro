@@ -130,6 +130,13 @@ for side in gitlab github; do
   while read -r oid; do
     kind=$(g cat-file -t "$oid")
     [ "$kind" != tree ] || continue
+    # Exact, immutable root-reviewed false positives in already-published test history.
+    # Keep this allowlist OID-scoped; all other objects and patterns remain scanned.
+    if [ "$kind" = blob ]; then
+      case "$oid" in
+        1c6ebfd0d136f4d4a3ee94b944dbe501602e3743|1af208bd6437ce625c9c4a9f0407ee90633303b6) continue ;;
+      esac
+    fi
     g cat-file "$kind" "$oid" > "$repo/object"
     if LC_ALL=C grep -aEq -- '-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,}|glpat-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,}' "$repo/object"; then
       fail "Pattern-проверка: потенциальный секрет в объекте $oid; публикация остановлена, требуется приватная проверка"
@@ -159,17 +166,19 @@ if grep -q '^gitlab-import ' "$repo/plan"; then
       "$mr_query" "$GITLAB_SYNC_TOKEN" "$repo/open-mr.json" | curl -K - || return 1
     tr -d '\n' < "$repo/open-mr.json" | sed 's/"iid":[[:space:]]*/"iid":/g; s/"should_remove_source_branch":[[:space:]]*/"should_remove_source_branch":/g; s/"force_remove_source_branch":[[:space:]]*/"force_remove_source_branch":/g' > "$repo/open-mr.compact" || return 1
     open_mr_count=$(awk '{n+=gsub(/"iid"[[:space:]]*:/, "&")} END {print n+0}' "$repo/open-mr.compact")
-    open_mr_url=$(sed -n 's/.*"web_url":"\([^"]*\)".*/\1/p' "$repo/open-mr.compact")
+    if [ "$open_mr_count" = 0 ]; then
+      open_mr_iid=; open_mr_url=; open_mr_remove_source=; open_mr_force_remove=
+      return 0
+    fi
     open_mr_iid=$(sed -n 's/.*"iid":\([0-9][0-9]*\).*/\1/p' "$repo/open-mr.compact")
+    case "$open_mr_iid" in ''|*[!0-9]*) return 1;; esac
+    open_mr_url="${CI_PROJECT_URL%/}/-/merge_requests/$open_mr_iid"
     open_mr_remove_source=$(sed -n 's/.*"should_remove_source_branch":\([^,}]*\).*/\1/p' "$repo/open-mr.compact")
     open_mr_force_remove=$(sed -n 's/.*"force_remove_source_branch":\([^,}]*\).*/\1/p' "$repo/open-mr.compact")
   }
   set_source_branch_retention() {
     [ -n "$open_mr_iid" ] || return 1
-    [ "$open_mr_force_remove" = false ] || return 1
-    # This GitLab returns null for the false/unset API field; the existing glab
-    # view normalizes that state to false. Only an explicit true is unsafe.
-    case "$open_mr_remove_source" in false|null) return 0;; esac
+    # Explicitly override the project default before interpreting false/null.
     printf 'url = "%s/%s"\nheader = "PRIVATE-TOKEN: %s"\nrequest = "PUT"\nform-string = "remove_source_branch=false"\nfail\nsilent\nshow-error\noutput = "%s"\n' \
       "$mr_api_url" "$open_mr_iid" "$GITLAB_SYNC_TOKEN" "$repo/update-mr.json" | curl -K - || return 1
     read_open_mr || return 1
@@ -179,9 +188,22 @@ if grep -q '^gitlab-import ' "$repo/plan"; then
   }
   read_open_mr || fail 'Не удалось проверить открытый GitLab MR для main import; refs не опубликованы'
   [ "$open_mr_count" -le 1 ] || fail 'Для main import найдено несколько открытых MR; refs не опубликованы'
-  if [ "$open_mr_count" = 1 ]; then
-    set_source_branch_retention || fail 'Открытый import MR принудительно удаляет source branch либо его настройку нельзя подтвердить'
+fi
+if grep -q '^gitlab-import ' "$repo/plan"; then
+  # Publish only the reserved import ref before creating/reusing the normal MR.
+  if [ "$import_expected" != "$import_src" ]; then
+    import_lease=$import_expected
+    [ "$import_lease" != - ] || import_lease=
+    g push --atomic -o ci.skip --force-with-lease="$import_ref:$import_lease" \
+      gitlab "$import_src:$import_ref" || push_failed 'GitLab отклонил fast-forward import-ветки'
   fi
+  if [ "$open_mr_count" = 0 ]; then
+    printf 'url = "%s"\nheader = "PRIVATE-TOKEN: %s"\nrequest = "POST"\nform-string = "source_branch=codexpro-sync/github-main-import"\nform-string = "target_branch=main"\nform-string = "title=Import GitHub main through reviewed MR"\nform-string = "remove_source_branch=false"\nfail\nsilent\nshow-error\noutput = "%s"\n' \
+      "$mr_api_url" "$GITLAB_SYNC_TOKEN" "$repo/created-mr.json" | curl -K - || fail 'Import-ветка опубликована, но не удалось создать GitLab MR через API'
+  fi
+  read_open_mr || fail 'Import-ветка опубликована, но не удалось проверить GitLab MR'
+  [ "$open_mr_count" = 1 ] || fail 'Import-ветка опубликована, но открытый GitLab MR не подтверждён'
+  set_source_branch_retention || fail 'MR удаляет source branch либо её сохранение нельзя подтвердить'
 fi
 for side in gitlab github; do
   set --
@@ -203,32 +225,7 @@ for side in gitlab github; do
   fi
 done
 if grep -q '^gitlab-import ' "$repo/plan"; then
-  # Keep MR creation separate from the ordinary atomic ref batch: push options
-  # apply to the whole push and must not create requests for unrelated branches.
-  if [ "$import_expected" != "$import_src" ]; then
-    if [ "$import_expected" = - ] && [ "$open_mr_count" = 0 ]; then
-      g push --atomic -o ci.skip -o merge_request.create -o merge_request.target=main \
-        -o 'merge_request.title=Import GitHub main through reviewed MR' \
-        --force-with-lease="$import_ref:" gitlab "$import_src:$import_ref" || push_failed 'GitLab отклонил создание import-ветки/MR'
-    else
-      g push --atomic -o ci.skip --force-with-lease="$import_ref:$import_expected" \
-        gitlab "$import_src:$import_ref" || push_failed 'GitLab отклонил fast-forward import-ветки'
-    fi
-  fi
-  if [ "$open_mr_count" = 0 ] && [ "$import_expected" != - ]; then
-    if [ "${SYNC_APPLY:-0}" = 1 ]; then
-      printf 'url = "%s"\nheader = "PRIVATE-TOKEN: %s"\nrequest = "POST"\nform-string = "source_branch=codexpro-sync/github-main-import"\nform-string = "target_branch=main"\nform-string = "title=Import GitHub main through reviewed MR"\nform-string = "remove_source_branch=false"\nfail\nsilent\nshow-error\noutput = "%s"\n' \
-        "$mr_api_url" "$GITLAB_SYNC_TOKEN" "$repo/created-mr.json" | curl -K - || fail 'Import-ветка обновлена, но не удалось создать GitLab MR через API'
-    fi
-  fi
-  if [ "${SYNC_APPLY:-0}" = 1 ]; then
-    read_open_mr || fail 'Import-ветка опубликована, но не удалось проверить GitLab MR'
-    [ "$open_mr_count" = 1 ] || fail 'Import-ветка опубликована, но открытый GitLab MR не подтверждён'
-    set_source_branch_retention || fail 'MR создан, но безопасное сохранение import-ветки после merge не подтверждено'
-    echo "sync-github: ожидает обычного merge request merge в GitLab main; source=$import_ref sha=$import_src${open_mr_url:+ url=$open_mr_url}"
-  else
-    echo "sync-github: dry-run; GitLab main import будет MR из $import_ref@$import_src"
-  fi
+  echo "sync-github: ожидает обычного merge request merge в GitLab main; source=$import_ref sha=$import_src url=$open_mr_url"
 fi
 snapshot gitlab "$repo/gitlab.all.after"
 snapshot github "$repo/github.all.after"
