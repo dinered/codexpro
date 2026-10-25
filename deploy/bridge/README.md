@@ -1,6 +1,10 @@
 # Docker pilot: ordinary Chrome and bridge reference
 
-Deployed pilot; see [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for verified runtime and remaining checks. Reference source is
+Deployed pilot with an open consecutive-message defect: an unsubmitted draft
+can receive the preceding assistant answer in Paseo. See
+[DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) and
+[the incident record](INCIDENT-STALE-ANSWER.md) for the current limits and evidence.
+Reference source is
 reference commit `9c556b1833cdad6589c85506605cd2ea4d156882`. The snapshot under
 `docs/mydocs/z.ai/download/bridge-reference` stays unchanged. Runtime overlays make `readPage` self-contained when Playwright serializes
 it and disconnect the bridge-owned CDP connection when the process completes.
@@ -147,8 +151,10 @@ restart and closed-tab recovery. Native provider/model discovery, DE egress and
 the actual shared router heartbeat passed. After the URL-binding, inactive-tab
 startup and modern idle-control corrections, one distinct authorized native
 message received its real answer in Paseo and completed. Its task text contained
-only ordinary user input. Login persistence across a browser restart remains
-unverified; see the exact runtime and acceptance evidence in
+only ordinary user input. Later operator use exposed stale-answer delivery when
+a new submission was not confirmed; reliable consecutive-turn acceptance is
+still open in [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7).
+Login persistence across a browser restart remains unverified; see the exact runtime and acceptance evidence in
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md).
 `operator-fixture.mjs` uses container-loopback port8049, which stays unpublished.
 

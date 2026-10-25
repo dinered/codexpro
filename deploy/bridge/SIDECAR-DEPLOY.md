@@ -22,7 +22,10 @@ The deployed target-image per-chat fixture, viewer/manual login, DE egress,
 provider/model discovery and shared ready heartbeat have passed. See
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for exact deployed identities.
 One distinct authorized native message received a real reply in Paseo and
-completed after the router corrections. Login persistence across a browser
+completed after the router corrections. Later consecutive messages exposed
+stale-answer delivery while the new text remained in the composer. General live
+acceptance is open in [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7);
+that correction is not deployed. Login persistence across a browser
 restart remains unverified. These updates preserved the browser container ID
 and its existing restart count.
 Source CI is a smoke job; it does not perform these deployment checks. The local
