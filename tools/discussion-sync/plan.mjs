@@ -187,6 +187,9 @@ function buildPlan(api, mapping, actors = {}) {
     addPair('pull_request', pair.githubNumber, pair.gitlabIid, gh, gl, ghComments, ordinary);
     for (const review of ghReviews) rows.push({ action: 'manual_review_history', sourceService: 'github', sourceObjectKind: 'github-pr', sourceObjectId: pair.githubNumber,
       sourceReviewId: review.id, reviewState: review.state, author: review.user?.login ?? null, submittedAt: review.submitted_at ?? null, targetObjectUrl: gl.web_url, automaticVote: false });
+    const glApprovals = api.gitlab(`merge_requests/${pair.gitlabIid}/approvals`);
+    for (const entry of glApprovals.approved_by ?? []) rows.push({ action: 'manual_review_history', sourceService: 'gitlab', sourceObjectKind: 'gitlab-mr', sourceObjectId: pair.gitlabIid,
+      reviewState: 'approved_at_read_time', author: entry.user?.username ?? null, submittedAt: null, targetObjectUrl: gh.html_url, automaticVote: false });
     for (const comment of ghInline) rows.push({ action: 'manual_inline_thread_review', sourceService: 'github', ...commentMetadata(comment, 'github', 'github-pr', pair.githubNumber, gh.html_url, ghProject),
       ...githubThreadMetadata(comment), sourceObjectId: pair.githubNumber, targetObjectUrl: gl.web_url, automaticVote: false });
     for (const discussion of glDiscussions) for (const note of discussion.notes ?? []) {
