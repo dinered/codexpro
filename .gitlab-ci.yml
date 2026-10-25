@@ -49,4 +49,7 @@ discussion-sync:
     SYNC_RUNNER_TAG: merge-train-smoke
     DISCUSSION_SYNC_APPLY: "0"
   script:
+    - command -v perl >/dev/null || { echo "required runtime perl missing"; exit 1; }
+    - command -v gh >/dev/null || { echo "required API CLI gh missing"; exit 1; }
+    - command -v glab >/dev/null || { echo "required API CLI glab missing"; exit 1; }
     - if [ "$DISCUSSION_SYNC_APPLY" = "1" ]; then perl tools/discussion-sync/sync.pl --apply; else perl tools/discussion-sync/sync.pl; fi
