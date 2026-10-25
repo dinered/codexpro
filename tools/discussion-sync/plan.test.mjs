@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addDirection, commentMetadata, parseMarkerIds, stableMarker, statusConflict } from './plan.mjs';
+import { addDirection, commentMetadata, gitlabThreadMetadata, githubThreadMetadata, parseMarkerIds, stableMarker, statusConflict } from './plan.mjs';
 
 test('stable markers identify one source record and hashes keep body text out of plan', () => {
   const row = commentMetadata({ id: 31, body: 'private text', created_at: 'same', updated_at: 'same', user: { login: 'author' } }, 'github', 'github-issue', 7);
@@ -49,4 +49,11 @@ test('status differences are review rows and never mutate either object', () => 
   assert.equal(row.automaticMutation, false);
   assert.equal(statusConflict('issue', 1, 'closed', 8, 'closed', 'gh', 'gl'), null);
   assert.equal(statusConflict('issue', 11, 'open', 7, 'opened', 'gh', 'gl'), null);
+});
+
+test('inline thread plan retains reply, path, review and resolution metadata without creating a vote', () => {
+  const gh = githubThreadMetadata({ pull_request_review_id: 8, in_reply_to_id: 7, path: 'src/a.js', line: 4, side: 'RIGHT' });
+  assert.deepEqual(gh, { reviewId: 8, replyToId: 7, filePath: 'src/a.js', line: 4, side: 'RIGHT' });
+  const gl = gitlabThreadMetadata({ id: 'thread-1', resolved: true }, { in_reply_to_id: 4, resolvable: true });
+  assert.deepEqual(gl, { threadId: 'thread-1', replyToId: 4, resolvable: true, resolved: true });
 });

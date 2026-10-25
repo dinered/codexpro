@@ -63,6 +63,25 @@ function statusConflict(kind, githubNumber, githubState, gitlabIid, gitlabState,
     gitlabIid, gitlabState, gitlabUrl, automaticMutation: false };
 }
 
+function githubThreadMetadata(comment) {
+  return {
+    reviewId: comment.pull_request_review_id ?? null,
+    replyToId: comment.in_reply_to_id ?? null,
+    filePath: comment.path ?? null,
+    line: comment.line ?? comment.original_line ?? null,
+    side: comment.side ?? comment.original_side ?? null,
+  };
+}
+
+function gitlabThreadMetadata(discussion, note) {
+  return {
+    threadId: discussion.id ?? null,
+    replyToId: note.in_reply_to_id ?? null,
+    resolvable: note.resolvable ?? false,
+    resolved: discussion.resolved ?? false,
+  };
+}
+
 function makeCliApi({ githubCli = 'gh', gitlabCli = 'glab' } = {}) {
   const getJson = (bin, endpoint) => JSON.parse(execFileSync(bin, ['api', endpoint], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   return {
@@ -124,9 +143,14 @@ function buildPlan(api, mapping) {
         submittedAt: review.submitted_at ?? null, targetObjectUrl: glMr.web_url, automaticVote: false });
     }
     for (const comment of ghInline) rows.push({ action: 'manual_inline_thread_review', ...commentMetadata(comment, 'github', 'github-pr', ghNumber),
-      sourceObjectId: ghNumber, targetObjectUrl: glMr.web_url, automaticVote: false });
-    for (const comment of glInline) rows.push({ action: 'manual_inline_thread_review', ...commentMetadata(comment, 'gitlab', 'gitlab-mr', glIid, glMr.web_url),
-      sourceObjectId: glIid, targetObjectUrl: ghPr.html_url, automaticVote: false });
+      ...githubThreadMetadata(comment), sourceObjectId: ghNumber, targetObjectUrl: glMr.web_url, automaticVote: false });
+    for (const discussion of glDiscussions) {
+      for (const note of discussion.notes ?? []) {
+        if (note.system || !note.position) continue;
+        rows.push({ action: 'manual_inline_thread_review', ...commentMetadata(note, 'gitlab', 'gitlab-mr', glIid, glMr.web_url),
+          ...gitlabThreadMetadata(discussion, note), sourceObjectId: glIid, targetObjectUrl: ghPr.html_url, automaticVote: false });
+      }
+    }
   }
 
   const reverse = mapping.gitlabOnlyIssue;
@@ -168,4 +192,4 @@ function main() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
 
-export { addDirection, buildPlan, commentMetadata, markerPattern, parseMarkerIds, stableMarker, statusConflict };
+export { addDirection, buildPlan, commentMetadata, gitlabThreadMetadata, githubThreadMetadata, markerPattern, parseMarkerIds, stableMarker, statusConflict };
