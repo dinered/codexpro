@@ -13,6 +13,11 @@ export class BoundDriver extends ChatGptDriver {
   override async ensureReady(ms: number) { await this.check(); await super.ensureReady(ms); }
   override async chatBusy() { await this.check(); return super.chatBusy(); }
   override async typeText(text: string) { await this.check(); await super.typeText(text); }
+  // R3 (ревью PR #10): порционный ввод (У-3) идёт через appendText — без этого
+  // override запись порций обходила проверку привязки: после навигации во время
+  // паузы следующая порция могла уйти в composer другой conversation. Проверка
+  // выполняется до записи КАЖДОЙ порции (движок зовёт appendText на порцию).
+  override async appendText(text: string) { await this.check(); await super.appendText(text); }
   override async composerText() { await this.check(); return super.composerText(); }
   override async clearComposer() { await this.check(); await super.clearComposer(); }
   override async pressSend() {

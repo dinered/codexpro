@@ -79,7 +79,9 @@ try {
   if (driver instanceof ChatGptDriver) {
     await driver.selftest();
     if (profile.network_probe) {
-      probe = await NetworkProbe.attach(driver.page, clock);
+      // R6: проба знает разрешённый origin платформы — 403/429 чужого origin
+      // и эндпоинты внутри query сигналом сопротивления не считаются
+      probe = await NetworkProbe.attach(driver.page, clock, new URL(profile.domain).origin);
     }
   }
 

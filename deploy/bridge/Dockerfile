@@ -20,10 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY docs/mydocs/z.ai/download/bridge-reference/ /app/
 COPY deploy/bridge/read-page.patch deploy/bridge/idle-control.patch deploy/bridge/shutdown.patch deploy/bridge/router-step.patch deploy/bridge/send-label.patch /tmp/
-RUN echo 'f3b28c68da9ff452e3180fab0075c4e6b4dff79003091e32b948f348c164e80a  src/driver/chatgpt.ts' | sha256sum -c - \
- && echo 'f7872f5d41d520e45125715a56172b93bdc1386d73767f1cdabfe2915bcd02d6  src/main.ts' | sha256sum -c - \
- && echo '269c7039c26dba2a8d325353aa8075fb280cf68a0c6aa90502c207e045be1ee0  src/bridge/loop.ts' | sha256sum -c - \
- && echo '7891844dd2b91499fb134605f4eae6c152250a21ff80a1903bcab34141cb281e  selectors/chatgpt.yaml' | sha256sum -c - \
+RUN echo '306eebd8f6a2a6d0fcd5c2d74c543c37f308065818c22a2ba5b7a604cd2a9c8e  src/driver/chatgpt.ts' | sha256sum -c - \
+ && echo 'd156b2b674e4d65e217a839812f9a743b1b07fbb898998f49f603774947bd9a3  src/main.ts' | sha256sum -c - \
+ && echo '30bdbb59c1dd429f630c38622741e11cd6a09f33e963247d3c98a5cc70416b47  src/bridge/loop.ts' | sha256sum -c - \
+ && echo 'bbea0c7357b54c02fcd6cf690796884c2599a8ec8fedf79557e7e27851356763  selectors/chatgpt.yaml' | sha256sum -c - \
  && patch --batch --fuzz=0 -p1 < /tmp/read-page.patch \
  && patch --batch --fuzz=0 -p1 < /tmp/idle-control.patch \
  && patch --batch --fuzz=0 -p1 < /tmp/shutdown.patch \

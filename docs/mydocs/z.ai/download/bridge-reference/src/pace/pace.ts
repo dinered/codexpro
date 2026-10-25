@@ -76,6 +76,24 @@ export function typingTimeMs(textLength: number, cfg: PaceConfig): number {
   return Math.min(cfg.maxTypingMs, Math.ceil((textLength / cfg.charsPerSec) * 1000));
 }
 
+/**
+ * Распределение бюджета набора по порциям (У-3, R5 ревью PR #10): один общий
+ * бюджет на ПОЛНОЕ сообщение — typingTimeMs всей длины (потолок maxTypingMs
+ * соблюдён внутри) с джиттером, растянутым один раз за сообщение, — делится
+ * между порциями пропорционально их длине, включая первую. Сумма долей равна
+ * бюджету (остаток округления уходит последней порции). Двойной оплаты нет:
+ * в chunks время набора исключено из базы паузы (typingPhysical), его платит
+ * стена через эти доли. Одна порция получает весь бюджет целиком.
+ */
+export function typingSharesMs(chunks: string[], cfg: PaceConfig, jitterDraw: number): number[] {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const total = Math.round(typingTimeMs(totalLength, cfg) * (1 + cfg.jitter * jitterDraw));
+  const shares = chunks.map((chunk) => Math.round((chunk.length / Math.max(1, totalLength)) * total));
+  const allocated = shares.reduce((sum, share) => sum + share, 0);
+  if (shares.length > 0) shares[shares.length - 1]! += total - allocated; // остаток округления — последней порции
+  return shares;
+}
+
 /** База паузы (П-2): max(minIntervalMs, время набора). Джиттер применяется поверх. */
 export function requiredBaseMs(textLength: number, cfg: PaceConfig): number {
   return Math.max(cfg.minIntervalMs, typingTimeMs(textLength, cfg));

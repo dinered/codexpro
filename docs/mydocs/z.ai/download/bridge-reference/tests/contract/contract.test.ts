@@ -618,3 +618,51 @@ test("контракт 19: 429 от API — фатально как капча (
     await cleanup(ctx);
   }
 });
+
+test("контракт 20: отмена между порциями chunks — поле стёрто, чужого черновика нет (R2)", async () => {
+  const ctx = await makeCtx({ generationMs: 100 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 1: общий бюджет набора упирается в потолок maxTypingMs (5 с),
+    // по ~2.5 с на порцию — отмена приходит в паузе ВТОРОЙ порции, когда первая
+    // уже записана в поле. R2 ревью PR #10: свой ввод учитывается с первой порции,
+    // уборка при отмене между порциями обязательна (остаток = чужой черновик, Н-4)
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 1, jitter: 0 } });
+    await pump(ctx, async () => ctx.driver.composer.includes("Первое"));
+    assert.equal(ctx.driver.sendCount, 0, "перед отменой отправки не было");
+    await ctx.client.cancel(task.id);
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "cancelled");
+    assert.equal(result?.code, "CANCEL");
+    assert.equal(ctx.driver.composer, "", "набранная порция стёрта: поле не остаётся чужим черновиком");
+    assert.equal(ctx.driver.sendCount, 0);
+    await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 21: капча во время порционного набора — остановка до отправки (R4, П-6)", async () => {
+  const ctx = await makeCtx({ challengeAt: 3_000 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 1: общий бюджет набора = потолку maxTypingMs (5 с), по ~2.5 с
+    // на порцию — капча (challengeAt 3 с) появляется посреди паузы ПЕРВОЙ порции.
+    // R4 ревью PR #10: периодический challenge-чек в паузах набора (challenge: true)
+    // ловит её ДО отправки; прежний код проверял капчу только после отправки
+    // (sendCount=1, CHALLENGE останавливал мост с уже отправленным сообщением)
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 1, jitter: 0 } });
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "error");
+    assert.equal(result?.code, "CHALLENGE");
+    assert.equal(ctx.driver.sendCount, 0, "отправки не было: капча поймана в паузе набора, до точки невозврата");
+    const finish = (await stopBridge(ctx, run)) as { fatal?: string | null };
+    assert.equal(finish?.fatal, "CHALLENGE");
+  } finally {
+    await cleanup(ctx);
+  }
+});

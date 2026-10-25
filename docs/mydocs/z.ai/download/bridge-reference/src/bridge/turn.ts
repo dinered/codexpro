@@ -12,7 +12,7 @@ import { stat } from "node:fs/promises";
 import { BridgeFatalError, errorMessage, isCrash, isErrno, isSpoolError, TurnError } from "../core/errors.ts";
 import { FATAL_REASON, TURN_ERROR, type AnswerSnapshot, type Phase, type TurnOutcome, type TurnTask } from "../core/types.ts";
 import type { BridgeConfig } from "../config.ts";
-import { typingTimeMs, type Pacer } from "../pace/pace.ts";
+import { typingSharesMs, type Pacer } from "../pace/pace.ts";
 import { aliveAge, isCancelled } from "../protocol/alive.ts";
 import { LeasePulser, stillOwned } from "../protocol/claim.ts";
 import { checkJournal, journalSend } from "../protocol/journal.ts";
@@ -179,6 +179,10 @@ class TurnEngine {
 
     const stopCause = await this.guard(); // отмена до отправки — стереть поле (Ф-1)
     if (stopCause) return await this.closeCancelled(stopCause, false);
+
+    // R4 (У-1, П-6): капча могла появиться во время набора — последняя проверка
+    // до точки невозврата; в паузах набора она проверялась периодически (У-3)
+    await this.checkChallenge();
 
     // ── ТОЧКА НЕВОЗВРАТА (birdview §2): state=sending → journal → клик ──
     await this.toPhase("sending");
@@ -392,19 +396,24 @@ class TurnEngine {
   }
 
   /** У-3: порционный ввод — текст по предложениям, интервалы из charsPerSec + джиттер
-   *  (П-1/П-5). Время набора платит стена, из базы паузы оно исключено (У-3, П-1). */
+   *  (П-1/П-5). Один общий бюджет набора полного сообщения распределён по порциям,
+   *  включая первую (R5 ревью PR #10): потолок maxTypingMs — на сообщение, не на
+   *  порцию, время набора платит стена и в базу паузы не входит (У-3, П-1).
+   *  В паузах проверяется капча (R4); свой ввод учитывается с первой порции (R2):
+   *  отмена между порциями стирает уже набранное, чтобы остаток не выглядел
+   *  чужим черновиком (Н-4). */
   private async typeInChunks(text: string): Promise<void> {
     const chunks = splitChunks(text);
+    const shares = typingSharesMs(chunks, this.cfg.pace, this.deps.rand.next());
     for (const [index, chunk] of chunks.entries()) {
-      if (index) {
-        const chunkMs = Math.round(typingTimeMs(chunk.length, this.cfg.pace) * (1 + this.cfg.pace.jitter * this.deps.rand.next()));
-        if (chunkMs > 0) {
-          this.log.event(EVENT.PACE_PAUSE, `порция ввода ${Math.round(chunkMs / 1000)} с (У-3)`);
-          const cause = await this.pause(chunkMs);
-          if (cause) throw new CancelledDuringWait(cause, false); // до отправки: поле наш, сотрём
-        }
+      const chunkMs = shares[index] ?? 0;
+      if (chunkMs > 0) {
+        this.log.event(EVENT.PACE_PAUSE, `порция ввода ${Math.round(chunkMs / 1000)} с (У-3)`);
+        const cause = await this.pause(chunkMs, { challenge: true }); // R4: капча проверяется в паузах набора
+        if (cause) throw new CancelledDuringWait(cause, false); // до отправки: поле наш, сотрём
       }
-      await this.deps.driver.appendText(chunk);
+      this.typed = true; // R2: свой ввод — с первой порции
+      await this.deps.driver.appendText(chunk); // R3: привязка проверяет адаптер драйвера на каждой записи
     }
   }
 

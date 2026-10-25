@@ -11,6 +11,7 @@ import {
   countInWindow,
   pauseBeforeSend,
   requiredBaseMs,
+  typingSharesMs,
   typingTimeMs,
   type PaceConfig,
 } from "../../src/pace/pace.ts";
@@ -147,4 +148,35 @@ test("Pacer: физический набор (У-3) — typingTimeMs исклю�
   const long = "x".repeat(1_000); // typingTimeMs упирается в maxTypingMs (120 с)
   assert.equal(pacer.delayFor(long, 0), cfg.maxTypingMs, "instant: база = время набора");
   assert.equal(pacer.delayFor(long, 0, true), cfg.minIntervalMs, "chunks: база = minIntervalMs без typingTime");
+});
+
+// R5 ревью PR #10: один общий бюджет набора на всё сообщение, включая первую
+// порцию; потолок maxTypingMs — на сообщение, а не на порцию.
+
+test("typingSharesMs (R5): одна порция платит весь бюджет, включая потолок", () => {
+  const slow: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 1, maxTypingMs: 10_000, jitter: 0 };
+  // 180 символов @1 симв/с — 180 с, упирается в потолок 10 с: одна порция платит все 10 с
+  assert.deepEqual(typingSharesMs(["х".repeat(180)], slow, 0), [10_000]);
+});
+
+test("typingSharesMs (R5): потолок общий на сообщение, а не на каждую порцию", () => {
+  const slow: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 1, maxTypingMs: 1_000, jitter: 0 };
+  const chunks = ["а".repeat(36), "б".repeat(36), "в".repeat(36), "г".repeat(36), "д".repeat(36)];
+  const shares = typingSharesMs(chunks, slow, 0);
+  assert.equal(shares.reduce((sum, ms) => sum + ms, 0), 1_000, "сумма долей = общему бюджету (было 4×1000)");
+  for (const share of shares) assert.ok(share > 0, "каждая порция платит, включая первую");
+});
+
+test("typingSharesMs (R5): джиттер растягивается один раз на сообщение, сумма сходится", () => {
+  const stretch: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 2, maxTypingMs: 60_000, jitter: 0.5 };
+  const chunks = ["Первое предложение. ", "Второе предложение подлиннее."];
+  const total = Math.round(typingTimeMs(chunks.join("").length, stretch) * (1 + 0.5 * 1));
+  const shares = typingSharesMs(chunks, stretch, 1);
+  assert.equal(shares.reduce((sum, ms) => sum + ms, 0), total, "сумма долей = бюджет с джиттером");
+  assert.ok(shares[0]! > 0, "первая порция не бесплатна");
+});
+
+test("typingSharesMs (R5): пустые порции и пустой список безопасны", () => {
+  assert.deepEqual(typingSharesMs([], cfg, 0), []);
+  assert.deepEqual(typingSharesMs([""], cfg, 0), [0]);
 });

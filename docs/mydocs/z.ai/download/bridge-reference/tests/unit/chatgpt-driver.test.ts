@@ -25,7 +25,8 @@ const PROFILE: PlatformProfile = {
   },
 };
 
-/** Заглушка Page: видимость кандидатов по селекторам, URL, клики с записью опций. */
+/** Заглушка Page: видимость кандидатов по селекторам, URL, клики с записью опций.
+ *  filter({visible:true}) — фильтр на стороне Playwright (R7): возвращает только видимых. */
 function stubPage(options: { url?: string; visibility?: Record<string, boolean[]>; failClick?: boolean } = {}) {
   const clicks: Array<Record<string, unknown> | undefined> = [];
   const page = {
@@ -35,6 +36,9 @@ function stubPage(options: { url?: string; visibility?: Record<string, boolean[]
       return {
         count: async () => list.length,
         nth: (index: number) => ({ isVisible: async () => list[index] ?? false }),
+        filter: (_opts: { visible: boolean }) => ({
+          first: () => ({ isVisible: async () => list.some(Boolean) }),
+        }),
         first: () => ({
           isVisible: async () => list[0] ?? false,
           click: async (opts?: Record<string, unknown>) => {
@@ -86,6 +90,22 @@ test("У-1: редирект на /auth/login — restriction без DOM-кан�
   assert.match(challenge?.detail ?? "", /\/auth\/login/);
 });
 
+test("R7: 20 скрытых кандидатов + видимый 21-й — капча найдена по всему набору", async () => {
+  const visibility = Array.from({ length: 20 }, () => false);
+  visibility.push(true); // видимый 21-й
+  const { page } = stubPage({ visibility: { "challenge-selector": visibility } });
+  const driver = new ChatGptDriver(page, PROFILE);
+  const challenge = await driver.challenge();
+  assert.equal(challenge?.kind, "captcha", "отсечение по позиции не прячет видимого кандидата");
+});
+
+test("R7: все 21 кандидат скрыт — капчи нет", async () => {
+  const visibility = Array.from({ length: 21 }, () => false);
+  const { page } = stubPage({ visibility: { "challenge-selector": visibility } });
+  const driver = new ChatGptDriver(page, PROFILE);
+  assert.equal(await driver.challenge(), null);
+});
+
 test("У-1: обычный чат — сопротивления нет (и без редиректа на логин)", async () => {
   const { page } = stubPage({ url: "https://chatgpt.com/c/abc" });
   const driver = new ChatGptDriver(page, PROFILE);
@@ -126,4 +146,56 @@ test("У-2: NetworkProbe — 403/429 на backend-api сигнал, прочее
   await probe.detach();
   assert.equal(probe.resistance(), null, "после detach сигнал сброшен");
   assert.equal(handlers.has("Network.responseReceived"), false, "обработчики сняты (detach в finally)");
+});
+
+test("R6: сторонний origin и эндпоинт внутри query — не сигналы; свой origin — сигнал", async () => {
+  const handlers = new Map<string, (params: unknown) => void>();
+  const session = {
+    send: async () => {},
+    on: (event: string, handler: (params: unknown) => void) => handlers.set(event, handler),
+    off: (event: string) => handlers.delete(event),
+    detach: async () => {},
+  };
+  const fakePage = { context: () => ({ newCDPSession: async () => session }) };
+  const clock = new ManualClock(1_700_000_000_000);
+  const probe = await NetworkProbe.attach(fakePage as unknown as Page, clock, "https://chatgpt.com");
+  assert.ok(probe, "подключение к подставной CDP-сессии удалось");
+  const emit = (status: number, url: string) => handlers.get("Network.responseReceived")!({ response: { status, url } });
+
+  emit(429, "https://third-party.invalid/backend-api/conversation");
+  assert.equal(probe.resistance(), null, "чужой origin с путём API чата — не сигнал");
+  emit(429, "https://third-party.invalid/pixel?next=/backend-api/conversation");
+  assert.equal(probe.resistance(), null, "эндпоинт внутри query — не сигнал (разбор URL, не подстрока)");
+  emit(403, "https://chatgpt.com/pixel?next=/backend-api/conversation");
+  assert.equal(probe.resistance(), null, "свой origin, но эндпоинт в query — не сигнал");
+  emit(429, "https://chatgpt.com/backend-api/conversation");
+  assert.deepEqual(probe.resistance(), { status: 429, count: 1 }, "свой origin и путь API чата — сигнал");
+
+  await probe.detach();
+  assert.equal(probe.resistance(), null, "после detach сигнал сброшен");
+});
+
+test("R6: без allowedOrigin origin берётся со страницы; не-http — только проверка пути", async () => {
+  const handlers = new Map<string, (params: unknown) => void>();
+  const session = {
+    send: async () => {},
+    on: (event: string, handler: (params: unknown) => void) => handlers.set(event, handler),
+    off: (event: string) => handlers.delete(event),
+    detach: async () => {},
+  };
+  const fakePage = {
+    url: () => "https://chatgpt.com/",
+    context: () => ({ newCDPSession: async () => session }),
+  };
+  const clock = new ManualClock(1_700_000_000_000);
+  const probe = await NetworkProbe.attach(fakePage as unknown as Page, clock);
+  assert.ok(probe, "подключение к подставной CDP-сессии удалось");
+  const emit = (status: number, url: string) => handlers.get("Network.responseReceived")!({ response: { status, url } });
+
+  emit(429, "https://third-party.invalid/backend-api/conversation");
+  assert.equal(probe.resistance(), null, "origin страницы — chatgpt.com: чужой origin отфильтрован");
+  emit(429, "https://chatgpt.com/backend-api/conversation");
+  assert.deepEqual(probe.resistance(), { status: 429, count: 1 }, "свой origin — сигнал");
+
+  await probe.detach();
 });

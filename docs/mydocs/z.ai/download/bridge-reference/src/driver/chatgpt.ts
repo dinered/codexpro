@@ -100,15 +100,15 @@ export class ChatGptDriver implements ChatDriver {
   async challenge(): Promise<Challenge | null> {
     if (!(await this.onDomain())) return null;
     // У-1: капча — списком кандидатов (Turnstile/hCaptcha/интерстишл + data-testid),
-    // как у кнопок (Д-5): найденным считается первый ВИДИМый кандидат.
+    // как у кнопок (Д-5). R7 ревью PR #10: первый ВИДИМый кандидат ищется по ВСЕМУ
+    // набору — фильтр видимости на стороне Playwright вместо отсечения первых 20
+    // совпадений по позиции (20 скрытых + видимый 21-й обязан находиться).
+    // Длительность проверки ограничена самим запросом: isVisible не ждёт.
     const sel = this.profile.selectors.challenge;
     if (sel) {
-      const candidates = this.page.locator(sel);
-      const count = Math.min(await candidates.count().catch(() => 0), 20);
-      for (let index = 0; index < count; index++) {
-        if (await candidates.nth(index).isVisible().catch(() => false)) {
-          return { kind: "captcha", detail: "платформа показывает проверку (капча/подтверждение)" };
-        }
+      const visible = this.page.locator(sel).filter({ visible: true });
+      if (await visible.first().isVisible().catch(() => false)) {
+        return { kind: "captcha", detail: "платформа показывает проверку (капча/подтверждение)" };
       }
     }
     // У-1: редирект на вход — домен тот же, путь ведёт на логин → ограничение (П-6)
