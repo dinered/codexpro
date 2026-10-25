@@ -22,6 +22,13 @@ discussion-sync-test:
   script:
     - perl tools/discussion-sync/core.test.pl
     - perl tools/discussion-sync/integration.test.pl
+discussion-sync-cli-test:
+  stage: test
+  tags: [merge-train-smoke]
+  script:
+    - sh -n tools/discussion-sync/bootstrap-cli.sh
+    - sh tools/discussion-sync/bootstrap-cli.sh --self-test
+    - DISCUSSION_SYNC_BIN_DIR="$CI_PROJECT_DIR/.ci-tools/bin" sh tools/discussion-sync/bootstrap-cli.sh --run sh -ec 'gh --version | grep -F "gh version 2.103.2"; glab --version | grep -F "glab 1.103.0"'
 # Все heads/tags; явное включение после review и первого проверенного запуска.
 sync-github:
   stage: deploy
@@ -49,7 +56,4 @@ discussion-sync:
     SYNC_RUNNER_TAG: merge-train-smoke
     DISCUSSION_SYNC_APPLY: "0"
   script:
-    - command -v perl >/dev/null || { echo "required runtime perl missing"; exit 1; }
-    - command -v gh >/dev/null || { echo "required API CLI gh missing"; exit 1; }
-    - command -v glab >/dev/null || { echo "required API CLI glab missing"; exit 1; }
-    - if [ "$DISCUSSION_SYNC_APPLY" = "1" ]; then perl tools/discussion-sync/sync.pl --apply; else perl tools/discussion-sync/sync.pl; fi
+    - if [ "$DISCUSSION_SYNC_APPLY" = "1" ]; then sh tools/discussion-sync/bootstrap-cli.sh --run perl tools/discussion-sync/sync.pl --apply; else sh tools/discussion-sync/bootstrap-cli.sh --run perl tools/discussion-sync/sync.pl; fi
