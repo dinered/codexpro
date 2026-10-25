@@ -27,7 +27,7 @@ sub reset_state { my (%opts)=@_; $state={gh=>\@gh,gl=>\@gl,posts=>[],counters=>{
 sub run_sync {
     my (%opts)=@_;
     local %ENV = (%ENV,
-      GH_CLI=>$fake, GLAB_CLI=>$fake, FAKE_STATE_FILE=>$state_file, FAKE_LOG_FILE=>$log_file,
+      GH_CLI=>$opts{gh_cli}//$fake, GLAB_CLI=>$opts{glab_cli}//$fake, FAKE_STATE_FILE=>$state_file, FAKE_LOG_FILE=>$log_file,
       DISCUSSION_SYNC_LOCK_FILE=>$opts{lock_file}//"$dir/run.lock", DISCUSSION_SYNC_ENABLED=>$opts{enabled}//'',
       DISCUSSION_SYNC_EXPECTED_PLAN_SHA256=>$opts{expected}//'',
       DISCUSSION_SYNC_RECURRING=>'false');
@@ -109,11 +109,17 @@ reset_state();
 my ($err_status,$err_out,$err_text)=run_sync(FAKE_ERROR_MODE=>'403');
 isnt($err_status,0,'HTTP 403 is surfaced as a failure');
 like($err_text,qr/HTTP 403.*verify the existing credential/,'403 gives sanitized access guidance');
+like($err_text,qr/github GET user \(HTTP 403\)/,'403 identifies only the failing service and operation');
 unlike($err_text.$err_out,qr/fixture-secret/,'permission errors never echo response secrets');
 my ($unauth_status,$unauth_out,$unauth_text)=run_sync(FAKE_ERROR_MODE=>'401');
 isnt($unauth_status,0,'HTTP 401 is surfaced as a failure');
 like($unauth_text,qr/HTTP 401.*verify the existing credential/,'401 gives sanitized access guidance');
+like($unauth_text,qr/github GET user \(HTTP 401\)/,'401 identifies only the failing service and operation');
 unlike($unauth_text.$unauth_out,qr/fixture-secret/,'401 errors never echo response secrets');
+my ($missing_cli_status,$missing_cli_out,$missing_cli_text)=run_sync(gh_cli=>"$dir/not-installed-gh");
+isnt($missing_cli_status,0,'missing runner CLI is detected');
+like($missing_cli_text,qr/API CLI unavailable for github GET user; install the required CLI on the protected runner/,'missing binary error names the CLI/service operation');
+unlike($missing_cli_text.$missing_cli_out,qr/fixture-secret/,'CLI diagnostics disclose no response data');
 
 reset_state();
 my $first_out="$dir/concurrent-first.out"; my $first_err="$dir/concurrent-first.err";

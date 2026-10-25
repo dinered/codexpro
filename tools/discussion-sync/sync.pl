@@ -65,27 +65,33 @@ sub safe_cli {
         open STDIN, '<', '/dev/null' or exit 126;
         open STDOUT, '>', $outpath or exit 126;
         open STDERR, '>', $errpath or exit 126;
-        exec {$bin} @cmd;
-        exit 127;
+        exec {$bin} @cmd or do {
+            syswrite STDERR, "DISCUSSION_SYNC_EXEC_FAILED\n";
+            POSIX::_exit(127);
+        };
     }
     my $timed_out = 0;
     local $SIG{ALRM} = sub { $timed_out = 1; kill 'TERM', $pid; select undef, undef, undef, 0.25; kill 'KILL', $pid; waitpid($pid, 0); die "API request timed out\n" };
     alarm $TIMEOUT;
     waitpid($pid, 0);
+    my $exit_code = $? >> 8;
     alarm 0;
-    if ($? != 0 || $timed_out) {
+    if ($exit_code != 0 || $timed_out) {
         if (open my $err, '<', $errpath) {
             my $message = ''; read($err, $message, 4096); close $err;
             my ($status) = $message =~ /\b(401|403)\b/;
-            die "API request failed (HTTP $status); verify the existing credential's required access\n" if $status;
+            my $context = "$service $method $endpoint";
+            die "API request failed for $context (HTTP $status); verify the existing credential's required access\n" if $status;
+            die "API CLI unavailable for $context; install the required CLI on the protected runner\n"
+                if $exit_code == 127 && $message =~ /DISCUSSION_SYNC_EXEC_FAILED/;
         }
-        die "API request failed\n";
+        die "API request failed for $service $method $endpoint\n";
     }
     die "API response exceeded size limit\n" if -s $outpath > $MAX_OUTPUT;
     open my $read, '<:raw', $outpath or die "API response unavailable\n";
     local $/; my $text = <$read>; close $read;
     my $decoded = eval { decode_json($text // '') };
-    die "API response was not valid JSON\n" if $@;
+    die "API response from $service $endpoint was not valid JSON\n" if $@;
     return $decoded;
 }
 sub get { return safe_cli($_[0], 'GET', $_[1], undef) }
