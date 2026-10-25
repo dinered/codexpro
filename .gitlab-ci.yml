@@ -16,13 +16,6 @@ sync-github-test:
   tags: [merge-train-smoke]
   script:
     - sh tools/sync-github/sync.test.sh
-discussion-sync-test:
-  stage: test
-  tags: [merge-train-smoke]
-  rules:
-    - if: $CI_PIPELINE_SOURCE =~ /^merge_(request|train)_event$/
-  script:
-    - node --test tools/discussion-sync/plan.test.mjs
 # Все heads/tags; явное включение после review и первого проверенного запуска.
 sync-github:
   stage: deploy
