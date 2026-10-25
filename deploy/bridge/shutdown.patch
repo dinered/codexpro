@@ -1,11 +1,14 @@
+diff --git a/src/main.ts b/src/main.ts
+index c4065c7..a3082f8 100755
 --- a/src/main.ts
 +++ b/src/main.ts
 @@ -6 +6 @@
 -import { chromium } from "playwright-core";
 +import { chromium, type Browser } from "playwright-core";
-@@ -58,0 +59 @@
+@@ -59,0 +60,2 @@ const log = createLogger();
 +const browserConnection: { current: Browser | null } = { current: null };
-@@ -96,0 +98,7 @@
++
+@@ -98,0 +101,7 @@ try {
 +} finally {
 +  // The bridge owns this CDP connection, while Chrome belongs to the operator.
 +  // close() on a CDP-connected Browser disconnects without closing Chrome.
@@ -13,5 +16,5 @@
 +    log.raw(`ошибка отключения от Chrome: ${errorMessage(error)}`);
 +    process.exitCode = 1;
 +  });
-@@ -105,0 +114 @@
+@@ -107,0 +117 @@ async function openChatGptDriver(cfg: BridgeConfig, profile: PlatformProfile, lo
 +  browserConnection.current = browser;

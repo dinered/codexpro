@@ -1,19 +1,19 @@
 diff --git a/src/driver/chatgpt.ts b/src/driver/chatgpt.ts
-index 68a2976..3050150 100755
+index 2a834ed..75a59e3 100755
 --- a/src/driver/chatgpt.ts
 +++ b/src/driver/chatgpt.ts
-@@ -131,0 +132,4 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
+@@ -159,0 +160,4 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
 +  const composer = document.querySelector(sel.composer);
 +  const composerText = composer && ("value" in composer ? String(composer.value ?? "") : composer.textContent ?? "");
 +  const emptyComposer = !!composer && isVisible(composer) && !composerText?.trim();
 +  const hasAnswer = !!last && [...last.querySelectorAll(sel.answer)].some(el => !!el.textContent?.trim());
-@@ -133,4 +137 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
+@@ -161,4 +165 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
 -    ? // холостое состояние — видимая и активная кнопка; спрятанная холостым не считается
 -      [...document.querySelectorAll(sel.send_button)].some(
 -        (button) => isVisible(button) && !(button as HTMLButtonElement).disabled,
 -      )
 +    ? enabledVisible(sel.send_button) || (emptyComposer && hasAnswer && enabledVisible(sel.idle_button))
-@@ -137,0 +139,6 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
+@@ -178,0 +180,6 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
 +
 +  function enabledVisible(selector: string | undefined): boolean {
 +    return !!selector && [...document.querySelectorAll(selector)].some(
@@ -21,9 +21,9 @@ index 68a2976..3050150 100755
 +    );
 +  }
 diff --git a/src/driver/selectors.ts b/src/driver/selectors.ts
-index 02407e4..d881450 100755
+index 4774adb..a243811 100755
 --- a/src/driver/selectors.ts
 +++ b/src/driver/selectors.ts
-@@ -20,0 +21,2 @@ export interface PlatformProfile {
+@@ -22,0 +23,2 @@ export interface PlatformProfile {
 +    /** Known ready control shown instead of Send only while the composer is empty. */
 +    idle_button?: string;

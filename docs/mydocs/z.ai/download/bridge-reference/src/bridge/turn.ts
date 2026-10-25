@@ -12,7 +12,7 @@ import { stat } from "node:fs/promises";
 import { BridgeFatalError, errorMessage, isCrash, isErrno, isSpoolError, TurnError } from "../core/errors.ts";
 import { FATAL_REASON, TURN_ERROR, type AnswerSnapshot, type Phase, type TurnOutcome, type TurnTask } from "../core/types.ts";
 import type { BridgeConfig } from "../config.ts";
-import type { Pacer } from "../pace/pace.ts";
+import { typingSharesMs, type Pacer } from "../pace/pace.ts";
 import { aliveAge, isCancelled } from "../protocol/alive.ts";
 import { LeasePulser, stillOwned } from "../protocol/claim.ts";
 import { checkJournal, journalSend } from "../protocol/journal.ts";
@@ -152,9 +152,9 @@ class TurnEngine {
     if (gate.warn) {
       this.log.event(EVENT.PACE_WARN, `в часовом окне ${gate.sentInWindow} отправок (жёлтый порог ${this.deps.pacer.cfg.hourlyWarn})`);
     }
-    const delayMs = this.deps.pacer.delayFor(task.text, this.deps.clock.now());
+    const delayMs = this.deps.pacer.delayFor(task.text, this.deps.clock.now(), this.cfg.inputMode === "chunks");
     if (delayMs > 0) {
-      this.log.event(EVENT.PACE_PAUSE, `пауза темпа ${Math.round(delayMs / 1000)} с перед набором (П-2)`);
+      this.log.event(EVENT.PACE_PAUSE, `пауза темпа ${Math.round(delayMs / 1000)} с перед набором (П-2${this.cfg.inputMode === "chunks" ? ", набор идёт физически — У-3" : ""})`);
       const cause = await this.pause(delayMs, { challenge: true });
       this.deps.crash?.("pace-wait");
       if (cause) return await this.closeCancelled(cause, false);
@@ -164,7 +164,11 @@ class TurnEngine {
     await this.toPhase("typing");
     this.deps.crash?.("typing");
     for (let attempt = 0; ; attempt++) {
-      await this.deps.driver.typeText(task.text);
+      if (this.cfg.inputMode === "chunks") {
+        await this.typeInChunks(task.text); // У-3: порционный ввод
+      } else {
+        await this.deps.driver.typeText(task.text);
+      }
       this.typed = true;
       if (normalizeText(await this.deps.driver.composerText()) === normalizeText(task.text)) break;
       await this.deps.driver.clearComposer();
@@ -175,6 +179,10 @@ class TurnEngine {
 
     const stopCause = await this.guard(); // отмена до отправки — стереть поле (Ф-1)
     if (stopCause) return await this.closeCancelled(stopCause, false);
+
+    // R4 (У-1, П-6): капча могла появиться во время набора — последняя проверка
+    // до точки невозврата; в паузах набора она проверялась периодически (У-3)
+    await this.checkChallenge();
 
     // ── ТОЧКА НЕВОЗВРАТА (birdview §2): state=sending → journal → клик ──
     await this.toPhase("sending");
@@ -343,6 +351,7 @@ class TurnEngine {
     const challenge = await this.deps.driver.challenge();
     if (challenge) {
       this.log.event(EVENT.CHALLENGE, `${challenge.kind}: ${challenge.detail} — мост прекращает отправки (П-6)`);
+      await this.deps.metrics.recordResistance("challenge").catch(() => {}); // У-6
       throw new BridgeFatalError(FATAL_REASON.CHALLENGE, challenge.detail);
     }
   }
@@ -370,11 +379,41 @@ class TurnEngine {
         throw new BridgeFatalError(FATAL_REASON.LEFT_DOMAIN, `вкладка ушла из домена платформы (Ф-7)`);
       }
       await this.checkChallenge();
+      // У-2: «невидимая» защита не рисует DOM — но видна на транспорте:
+      // 403/429 от API чата — тот же фатальный путь, что капча (П-6)
+      const resistance = this.deps.probe?.resistance() ?? null;
+      if (resistance) {
+        this.log.event(EVENT.CHALLENGE, `network ${resistance.status} на API-эндпоинтах (сигналов: ${resistance.count}) — мост прекращает отправки (П-6, У-2)`);
+        await this.deps.metrics.recordResistance("challenge").catch(() => {}); // У-6
+        throw new BridgeFatalError(FATAL_REASON.CHALLENGE, `платформа отвечает ${resistance.status} на API-эндпоинты чата (сетевой сигнал сопротивления, П-6)`);
+      }
       const markdown = htmlToMarkdown(snapshot.html);
       const streamIdle = this.deps.probe ? this.deps.probe.idleMs() > 1_500 : undefined;
       if (detector.push({ busy: snapshot.busy, sendIdle: snapshot.sendIdle, text: markdown, streamIdle }, this.deps.clock.now()) === "complete") {
         return detector.stableText;
       }
+    }
+  }
+
+  /** У-3: порционный ввод — текст по предложениям, интервалы из charsPerSec + джиттер
+   *  (П-1/П-5). Один общий бюджет набора полного сообщения распределён по порциям,
+   *  включая первую (R5 ревью PR #10): потолок maxTypingMs — на сообщение, не на
+   *  порцию, время набора платит стена и в базу паузы не входит (У-3, П-1).
+   *  В паузах проверяется капча (R4); свой ввод учитывается с первой порции (R2):
+   *  отмена между порциями стирает уже набранное, чтобы остаток не выглядел
+   *  чужим черновиком (Н-4). */
+  private async typeInChunks(text: string): Promise<void> {
+    const chunks = splitChunks(text);
+    const shares = typingSharesMs(chunks, this.cfg.pace, this.deps.rand.next());
+    for (const [index, chunk] of chunks.entries()) {
+      const chunkMs = shares[index] ?? 0;
+      if (chunkMs > 0) {
+        this.log.event(EVENT.PACE_PAUSE, `порция ввода ${Math.round(chunkMs / 1000)} с (У-3)`);
+        const cause = await this.pause(chunkMs, { challenge: true }); // R4: капча проверяется в паузах набора
+        if (cause) throw new CancelledDuringWait(cause, false); // до отправки: поле наш, сотрём
+      }
+      this.typed = true; // R2: свой ввод — с первой порции
+      await this.deps.driver.appendText(chunk); // R3: привязка проверяет адаптер драйвера на каждой записи
     }
   }
 
@@ -482,6 +521,44 @@ class CancelledDuringWait extends Error {
     this.cause = cause;
     this.afterSend = afterSend;
   }
+}
+
+/**
+ * Разбивка текста на порции ввода (У-3): предложения, длинные — по словам.
+ * Разделители сохраняются — конкатенция порций равна исходному тексту (Ф-4).
+ */
+export function splitChunks(text: string, maxLen = 200): string[] {
+  const bounds: number[] = [];
+  for (const match of text.matchAll(/[.!?…]+["»)]?(?=\s)/g)) {
+    bounds.push(match.index + match[0].length + 1); // граница после одного пробела-разделителя
+  }
+  const pieces: string[] = [];
+  let start = 0;
+  for (const bound of bounds) {
+    if (bound > start) {
+      pieces.push(text.slice(start, bound));
+      start = bound;
+    }
+  }
+  if (start < text.length) pieces.push(text.slice(start));
+  const chunks: string[] = [];
+  for (const piece of pieces) {
+    if (piece.length <= maxLen) {
+      if (piece) chunks.push(piece);
+      continue;
+    }
+    let current = "";
+    for (const token of piece.split(/(?<=\s)/)) { // слова с хвостовым пробелом — срез сохраняет текст
+      if (current.length + token.length > maxLen && current) {
+        chunks.push(current);
+        current = token;
+      } else {
+        current += token;
+      }
+    }
+    if (current) chunks.push(current);
+  }
+  return chunks.length ? chunks : [text];
 }
 
 /** Сбой драйвера распознаётся структурно: Error с полем kind (driverFailure()). */

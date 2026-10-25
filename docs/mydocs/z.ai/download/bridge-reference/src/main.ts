@@ -79,7 +79,9 @@ try {
   if (driver instanceof ChatGptDriver) {
     await driver.selftest();
     if (profile.network_probe) {
-      probe = await NetworkProbe.attach(driver.page, clock);
+      // R6: проба знает разрешённый origin платформы — 403/429 чужого origin
+      // и эндпоинты внутри query сигналом сопротивления не считаются
+      probe = await NetworkProbe.attach(driver.page, clock, new URL(profile.domain).origin);
     }
   }
 
@@ -100,7 +102,7 @@ try {
 async function openChatGptDriver(cfg: BridgeConfig, profile: PlatformProfile, log: Logger): Promise<ChatGptDriver> {
   const browser = await chromium.connectOverCDP(cfg.cdpUrl).catch((error: unknown) => {
     throw new Error(
-      `нет Chrome с отладкой на ${cfg.cdpUrl} — см. README, раздел «Запуск»: ${errorMessage(error)}`,
+      `нет Chrome с отладкой на ${cfg.cdpUrl} — см. README, разделы «Запуск» (правила запуска Chrome) и «Что видит платформа»: ${errorMessage(error)}`,
     );
   });
   const pages = browser.contexts().flatMap((context) => context.pages());

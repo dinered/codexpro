@@ -74,6 +74,10 @@ export class HumanDriver implements ChatDriver {
     this.composer = this.scenario.glitchFirstType && this.typeCount === 1 ? text.slice(0, -1) : text;
   }
 
+  async appendText(text: string): Promise<void> {
+    this.composer += text;
+  }
+
   async composerText(): Promise<string> {
     return this.composer;
   }

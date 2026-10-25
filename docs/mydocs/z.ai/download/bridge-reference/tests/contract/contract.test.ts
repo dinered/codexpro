@@ -26,6 +26,7 @@ import { journalSize, journalSend } from "../../src/protocol/journal.ts";
 import { readLatestState, writeState } from "../../src/protocol/state.ts";
 import { createClaim } from "../../src/protocol/claim.ts";
 import type { BridgeConfig } from "../../src/config.ts";
+import type { NetworkProbe } from "../../src/driver/cdp-stream.ts";
 
 interface Ctx {
   root: string;
@@ -59,6 +60,7 @@ function bridgeFor(
   ctx: Ctx,
   crash?: (point: CrashPoint) => void,
   overrides: Partial<Omit<BridgeConfig, "pace">> & { pace?: Partial<PaceConfig> } = {},
+  probe: NetworkProbe | null = null,
 ): Run {
   const config = testConfig(ctx.root, overrides);
   const bridge = new Bridge({
@@ -69,7 +71,7 @@ function bridgeFor(
     rand: new SeededRandom(ctx.seed + 2),
     log: createLogger((line) => ctx.lines.push(line), () => ctx.clock.now()),
     metrics: new Metrics(null, "metrics.json", ctx.clock, createLogger(() => {}, () => ctx.clock.now())),
-    probe: null,
+    probe,
     stop: ctx.stop,
     crash,
   });
@@ -548,3 +550,101 @@ async function assertAckDisposeRace(scenario: "до-опроса" | "stat-confir
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) throw new AggregateError(failures, `сценарий ${scenario}: ошибка проверки и очистки`);
 }
+
+test("контракт 18: порционный ввод chunks — без двойного учёта времени, сверка Ф-4 (У-3)", async () => {
+  const ctx = await makeCtx({ generationMs: 100 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп. Третье предложение про протокол.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 10: instant-база была бы ~9 с (время набора); chunks — около minInterval
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 10 } });
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "ok");
+    // Ф-4: конкатенция порций равна задаче — ход дошёл до отправки без TEXT_MISMATCH
+    assert.match(result?.markdown ?? "", /Первое предложение про мост/);
+    const pauseLine = ctx.lines.find((line) => line.includes("PACE_PAUSE") && line.includes("перед набором"));
+    assert.ok(pauseLine, "пауза темпа записана");
+    const pauseSec = Number(/пауза темпа (\d+) с/.exec(pauseLine!)?.[1] ?? 0);
+    assert.ok(pauseSec < 5, `в базе паузы нет времени набора: ${pauseSec} с (instant был бы ~9 с)`);
+    assert.ok(ctx.lines.some((line) => line.includes("порция ввода")), "набор шёл порциями");
+    assert.equal(ctx.driver.sendCount, 1);
+    await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 19: 429 от API — фатально как капча (У-2); без пробы (флаг off) поведение прежнее", async () => {
+  const ctx = await makeCtx({ generationMs: 30_000 });
+  try {
+    const task = await ctx.client.put("невидимая защита", ALIVE);
+    let resist = false;
+    // заглушка NetworkProbe: сопротивление появляется ПОСЛЕ отправки (в generating)
+    const probe = {
+      idleMs: () => 0,
+      resistance: () => (resist ? { status: 429, count: 2 } : null),
+    } as unknown as NetworkProbe;
+    const run = bridgeFor(ctx, undefined, {}, probe);
+    await pump(ctx, () => ctx.driver.sendCount === 1);
+    resist = true; // платформа начала отвечать 429 на backend-api
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "error");
+    assert.equal(result?.code, "CHALLENGE");
+    assert.match(result?.message ?? "", /429/);
+    assert.ok(ctx.lines.some((line) => line.includes("CHALLENGE") && line.includes("У-2")));
+    const finish = (await stopBridge(ctx, run)) as { fatal?: string | null };
+    assert.equal(finish?.fatal, "CHALLENGE");
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 20: отмена между порциями chunks — поле стёрто, чужого черновика нет (R2)", async () => {
+  const ctx = await makeCtx({ generationMs: 100 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 1: общий бюджет набора упирается в потолок maxTypingMs (5 с),
+    // по ~2.5 с на порцию — отмена приходит в паузе ВТОРОЙ порции, когда первая
+    // уже записана в поле. R2 ревью PR #10: свой ввод учитывается с первой порции,
+    // уборка при отмене между порциями обязательна (остаток = чужой черновик, Н-4)
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 1, jitter: 0 } });
+    await pump(ctx, async () => ctx.driver.composer.includes("Первое"));
+    assert.equal(ctx.driver.sendCount, 0, "перед отменой отправки не было");
+    await ctx.client.cancel(task.id);
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "cancelled");
+    assert.equal(result?.code, "CANCEL");
+    assert.equal(ctx.driver.composer, "", "набранная порция стёрта: поле не остаётся чужим черновиком");
+    assert.equal(ctx.driver.sendCount, 0);
+    await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 21: капча во время порционного набора — остановка до отправки (R4, П-6)", async () => {
+  const ctx = await makeCtx({ challengeAt: 3_000 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 1: общий бюджет набора = потолку maxTypingMs (5 с), по ~2.5 с
+    // на порцию — капча (challengeAt 3 с) появляется посреди паузы ПЕРВОЙ порции.
+    // R4 ревью PR #10: периодический challenge-чек в паузах набора (challenge: true)
+    // ловит её ДО отправки; прежний код проверял капчу только после отправки
+    // (sendCount=1, CHALLENGE останавливал мост с уже отправленным сообщением)
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 1, jitter: 0 } });
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "error");
+    assert.equal(result?.code, "CHALLENGE");
+    assert.equal(ctx.driver.sendCount, 0, "отправки не было: капча поймана в паузе набора, до точки невозврата");
+    const finish = (await stopBridge(ctx, run)) as { fatal?: string | null };
+    assert.equal(finish?.fatal, "CHALLENGE");
+  } finally {
+    await cleanup(ctx);
+  }
+});

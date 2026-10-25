@@ -11,6 +11,7 @@ import {
   countInWindow,
   pauseBeforeSend,
   requiredBaseMs,
+  typingSharesMs,
   typingTimeMs,
   type PaceConfig,
 } from "../../src/pace/pace.ts";
@@ -107,9 +108,9 @@ test("Pacer: час спустя окно свободно — счётчик п
 
 test("Pacer: часовой лимит не трогает серию ошибок (R10, П-3)", () => {
   const pacer = new Pacer(cfg, zero);
-  pacer.recordError();
-  pacer.recordError();
-  pacer.recordError();
+  pacer.recordError(0);
+  pacer.recordError(0);
+  pacer.recordError(0);
   const streakBefore = pacer.errorStreak;
   pacer.noteRateLimit();
   pacer.limitCheck(0);
@@ -118,10 +119,84 @@ test("Pacer: часовой лимит не трогает серию ошибо
 
 test("Pacer: успех сбрасывает серию ошибок, пауза растёт от серии (Н-5)", () => {
   const pacer = new Pacer(cfg, zero);
-  assert.equal(pacer.recordError(), 0);
-  assert.equal(pacer.recordError(), 0);
-  assert.equal(pacer.recordError(), cfg.errorBackoffMs); // третья подряд — пауза
+  assert.equal(pacer.recordError(0), 0);
+  assert.equal(pacer.recordError(0), 0);
+  assert.equal(pacer.recordError(0), cfg.errorBackoffMs); // третья подряд — пауза
   pacer.recordSuccess();
   assert.equal(pacer.errorStreak, 0);
-  assert.equal(pacer.recordError(), 0); // серия началась заново
+  assert.equal(pacer.recordError(0), 0); // серия началась заново
+});
+
+test("Pacer: backoffUntilMs в срезе — пауза серии видна и гаснет по времени (У-7)", () => {
+  const pacer = new Pacer(cfg, zero);
+  assert.equal(pacer.snapshot(10_000).backoffUntilMs, null, "без ошибок паузы нет");
+  pacer.recordError(10_000);
+  pacer.recordError(10_000);
+  assert.equal(pacer.snapshot(10_000).backoffUntilMs, null, "серия ниже лимита — паузы нет");
+  const pauseMs = pacer.recordError(10_000);
+  assert.equal(pauseMs, cfg.errorBackoffMs);
+  assert.equal(pacer.snapshot(10_000).backoffUntilMs, 10_000 + cfg.errorBackoffMs);
+  assert.equal(pacer.snapshot(10_000 + cfg.errorBackoffMs).backoffUntilMs, null, "пауза истекла — null");
+  pacer.recordSuccess();
+  pacer.recordError(20_000); // серия заново — ниже лимита
+  assert.equal(pacer.snapshot(20_000).backoffUntilMs, null);
+});
+
+test("Pacer: физический набор (У-3) — typingTimeMs исключён из базы паузы", () => {
+  const noJitter = { next: () => 0, int: (n: number) => 0, pick: <T,>(xs: readonly T[]) => xs[0]! };
+  const pacer = new Pacer(cfg, noJitter);
+  const long = "x".repeat(1_000); // typingTimeMs упирается в maxTypingMs (120 с)
+  assert.equal(pacer.delayFor(long, 0), cfg.maxTypingMs, "instant: база = время набора");
+  assert.equal(pacer.delayFor(long, 0, true), cfg.minIntervalMs, "chunks: база = minIntervalMs без typingTime");
+});
+
+// R5 ревью PR #10: один общий бюджет набора на всё сообщение, включая первую
+// порцию; потолок maxTypingMs — на сообщение, а не на порцию.
+
+test("typingSharesMs (R5): одна порция платит весь бюджет, включая потолок", () => {
+  const slow: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 1, maxTypingMs: 10_000, jitter: 0 };
+  // 180 символов @1 симв/с — 180 с, упирается в потолок 10 с: одна порция платит все 10 с
+  assert.deepEqual(typingSharesMs(["х".repeat(180)], slow, 0), [10_000]);
+});
+
+test("typingSharesMs (R5): потолок общий на сообщение, а не на каждую порцию", () => {
+  const slow: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 1, maxTypingMs: 1_000, jitter: 0 };
+  const chunks = ["а".repeat(36), "б".repeat(36), "в".repeat(36), "г".repeat(36), "д".repeat(36)];
+  const shares = typingSharesMs(chunks, slow, 0);
+  assert.equal(shares.reduce((sum, ms) => sum + ms, 0), 1_000, "сумма долей = общему бюджету (было 4×1000)");
+  for (const share of shares) assert.ok(share > 0, "каждая порция платит, включая первую");
+});
+
+test("typingSharesMs (R5): джиттер растягивается один раз на сообщение, сумма сходится", () => {
+  const stretch: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 2, maxTypingMs: 60_000, jitter: 0.5 };
+  const chunks = ["Первое предложение. ", "Второе предложение подлиннее."];
+  const total = Math.round(typingTimeMs(chunks.join("").length, stretch) * (1 + 0.5 * 1));
+  const shares = typingSharesMs(chunks, stretch, 1);
+  assert.equal(shares.reduce((sum, ms) => sum + ms, 0), total, "сумма долей = бюджет с джиттером");
+  assert.ok(shares[0]! > 0, "первая порция не бесплатна");
+});
+
+test("typingSharesMs (R5): пустые порции и пустой список безопасны", () => {
+  assert.deepEqual(typingSharesMs([], cfg, 0), []);
+  assert.deepEqual(typingSharesMs([""], cfg, 0), [0]);
+});
+
+test("typingSharesMs: много коротких и пустых порций — целые неотрицательные доли, один бюджет", () => {
+  for (const count of [0, 1, 2, 5, 2_000]) {
+    const chunks = ["", ...Array.from({ length: count }, () => "A. "), ""];
+    for (const maxTypingMs of [0, 1, 7, 1_000]) {
+      for (const draw of [0, 0.5, 1]) {
+        const cfg: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 1, maxTypingMs, jitter: 0.5 };
+        const shares = typingSharesMs(chunks, cfg, draw);
+        const budget = Math.round(typingTimeMs(chunks.join("").length, cfg) * (1 + cfg.jitter * draw));
+        assert.equal(shares.length, chunks.length);
+        assert.ok(shares.every((ms) => Number.isInteger(ms) && ms >= 0), `count=${count}, budget=${budget}: отрицательная доля`);
+        assert.equal(shares.filter((ms) => ms > 0).reduce((sum, ms) => sum + ms, 0), budget,
+          "именно оплачиваемая положительная сумма равна единому бюджету");
+        assert.equal(shares[0], 0, "пустая порция не платит");
+        assert.equal(shares.at(-1), 0, "пустой хвост не получает остаток округления");
+      }
+    }
+  }
+  assert.deepEqual(typingSharesMs(["", ""], { ...DEFAULT_PACE, charsPerSec: 0 }, 0), [0, 0]);
 });
