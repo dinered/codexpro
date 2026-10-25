@@ -25,6 +25,12 @@ my $mirror = { body => $envelope, api_actor => 'sync-gl' };
 my %base = (origin => $origin, source_body => $body, source_api_actor => 'source-author', source_sync_actor => 'sync-gh',
     target_comments => [$mirror], target_sync_actor => 'sync-gl', source_hash => $hash);
 is(classify_comment(%base), 'already_mirrored', 'partial-write retry detects the existing remote marker');
+my $older_envelope = render_mirror($origin, 'older source revision', 'sync-gl', 'github', 'https://github.test/source', 'author', '2026-10-24T01:00:00Z');
+my $ambiguous_copy = { body => $envelope . "\nmanual edit", api_actor => 'sync-gl' };
+is(classify_comment(%base, target_comments => [$mirror, $ambiguous_copy]), 'conflict', 'later edited copy conflicts after a valid current marker');
+is(classify_comment(%base, target_comments => [$ambiguous_copy, $mirror]), 'conflict', 'earlier edited copy conflicts before a valid current marker');
+is(classify_comment(%base, target_comments => [$mirror, {body=>$older_envelope,api_actor=>'sync-gl'}]), 'already_mirrored', 'multiple legitimate revision copies are accepted when current body is mirrored');
+is(classify_comment(%base, target_comments => [{body=>$older_envelope,api_actor=>'sync-gl'}]), 'source_revision', 'older legitimate mirror is classified as source revision');
 is(classify_comment(%base, source_body => 'edited source', source_hash => body_hash('edited source')), 'source_revision', 'edited source becomes a revision, not a duplicate or overwrite');
 is(classify_comment(%base, source_body => $envelope, source_api_actor => 'sync-gl', source_sync_actor => 'sync-gl'), 'source_is_mirror', 'reverse traversal does not echo the mirror');
 is(classify_comment(%base, target_comments => [{ body => $envelope . "\nedit", api_actor => 'sync-gl' }]), 'conflict', 'concurrent target edit fails closed');

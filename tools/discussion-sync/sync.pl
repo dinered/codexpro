@@ -34,8 +34,6 @@ die "initial discussion sync apply requires an expected SHA-256 plan hash\n" if 
 die "recurring discussion sync apply requires DISCUSSION_SYNC_RECURRING_CONFIRMED=true\n"
     if $APPLY && $RECURRING && ($ENV{DISCUSSION_SYNC_RECURRING_CONFIRMED} // '') ne 'true';
 die "expected plan hash must be lowercase SHA-256\n" if length($EXPECTED) && $EXPECTED !~ /\A[a-f0-9]{64}\z/;
-die "discussion sync apply requires confirmed GitHub Issues and Pull requests write permissions\n"
-    if $APPLY && ($ENV{DISCUSSION_SYNC_WRITE_CAPABILITY_CONFIRMED} // '') ne 'true';
 my $lock_path = $ENV{DISCUSSION_SYNC_LOCK_FILE} // '/tmp/codexpro-discussion-sync.lock';
 open my $lock, '>>', $lock_path or die "cannot open discussion-sync lock\n";
 flock($lock, LOCK_EX | LOCK_NB) or die "another local discussion-sync run is active\n";
@@ -50,6 +48,7 @@ sub safe_cli {
     if ($method ne 'GET') {
         push @cmd, '-X', $method;
         if (defined $payload) {
+            push @cmd, '-H', 'Content-Type: application/json';
             my ($fh, $path) = tempfile('request-XXXXXX', DIR => $TEMP, UNLINK => 0);
             chmod 0600, $path;
             print {$fh} JSON::PP->new->canonical->utf8->encode($payload);
@@ -74,7 +73,14 @@ sub safe_cli {
     alarm $TIMEOUT;
     waitpid($pid, 0);
     alarm 0;
-    die "API request failed\n" if $? != 0 || $timed_out;
+    if ($? != 0 || $timed_out) {
+        if (open my $err, '<', $errpath) {
+            my $message = ''; read($err, $message, 4096); close $err;
+            my ($status) = $message =~ /\b(401|403)\b/;
+            die "API request failed (HTTP $status); verify the existing credential's required access\n" if $status;
+        }
+        die "API request failed\n";
+    }
     die "API response exceeded size limit\n" if -s $outpath > $MAX_OUTPUT;
     open my $read, '<:raw', $outpath or die "API response unavailable\n";
     local $/; my $text = <$read>; close $read;
@@ -112,6 +118,12 @@ sub has_attachment { my ($body) = @_; return $body =~ /(?:!\[[^\]]*\]\([^)]*\)|h
 sub project_path { my ($kind, $iid) = @_; return $kind eq 'issue' ? "issues/$iid" : "merge_requests/$iid" }
 sub note_path { my ($kind, $iid) = @_; return 'projects/27/' . project_path($kind, $iid) . '/notes?activity_filter=only_comments' }
 sub comments_path { my ($number) = @_; return "repos/dinered/codexpro/issues/$number/comments" }
+sub source_revalidate_endpoint {
+    my ($service, $kind, $object, $comment) = @_;
+    return "repos/dinered/codexpro/issues/comments/$comment" if $service eq 'github';
+    my $gitlab_kind = $kind eq 'gitlab-issue' ? 'issue' : 'merge_request';
+    return 'projects/27/' . project_path($gitlab_kind, $object) . "/notes/$comment";
+}
 sub comment_record {
     my (%arg) = @_;
     my $body = defined $arg{item}{body} ? $arg{item}{body} : '';
@@ -136,7 +148,7 @@ sub comment_record {
         createdAt => $arg{item}{created_at}, updatedAt => $arg{item}{updated_at}, sourceUrl => $source_url,
         targetObjectUrl => $arg{target_object_url}, attachmentCount => has_attachment($body) ? 1 : 0,
         _body => $body, _sourceService => $arg{source_service}, _sourceEndpoint => $arg{source_endpoint},
-        _sourceRevalidateEndpoint => $arg{source_service} eq 'github' ? "repos/dinered/codexpro/issues/comments/$id" : "projects/27/notes/$id",
+        _sourceRevalidateEndpoint => source_revalidate_endpoint($arg{source_service}, $arg{source_kind}, $arg{source_id}, $id),
         _targetEndpoint => $arg{target_endpoint}, _targetKind => $arg{target_kind}, _targetId => $arg{target_id},
         _sourceRecord => $arg{item}, _targetItems => $arg{target_items} };
 }

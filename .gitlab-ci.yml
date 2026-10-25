@@ -21,6 +21,7 @@ discussion-sync-test:
   tags: [merge-train-smoke]
   script:
     - perl tools/discussion-sync/core.test.pl
+    - perl tools/discussion-sync/integration.test.pl
 # Все heads/tags; явное включение после review и первого проверенного запуска.
 sync-github:
   stage: deploy

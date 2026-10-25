@@ -39,15 +39,17 @@ sub classify_comment {
     my $own = parse_mirror($arg{source_body}, $arg{source_api_actor}, $arg{source_sync_actor});
     return 'source_is_mirror' if $own->{state} eq 'verified';
     return 'conflict' if $own->{state} eq 'ambiguous';
-    my ($found, $stale) = (0, 0);
+    my ($found, $stale, $current_copy, $ambiguous) = (0, 0, 0, 0);
     for my $target (@{$arg{target_comments} // []}) {
         my $m = parse_mirror($target->{body}, $target->{api_actor}, $arg{target_sync_actor});
-        return 'conflict' if $m->{state} eq 'ambiguous';
+        $ambiguous = 1 if $m->{state} eq 'ambiguous';
         next unless $m->{state} eq 'verified' && $m->{origin} eq $arg{origin};
         $found = 1;
-        return 'already_mirrored' if $m->{hash} eq $arg{source_hash};
+        $current_copy = 1 if $m->{hash} eq $arg{source_hash};
         $stale = 1;
     }
+    return 'conflict' if $ambiguous;
+    return 'already_mirrored' if $current_copy;
     return $found && $stale ? 'source_revision' : 'create';
 }
 sub plan_hash { my ($plan) = @_; return sha256_hex(JSON::PP->new->canonical->utf8->encode($plan)) }
