@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY docs/mydocs/z.ai/download/bridge-reference/ /app/
-COPY deploy/bridge/read-page.patch deploy/bridge/idle-control.patch deploy/bridge/shutdown.patch deploy/bridge/router-step.patch deploy/bridge/send-label.patch /tmp/
+COPY deploy/bridge/read-page.patch deploy/bridge/idle-control.patch deploy/bridge/shutdown.patch deploy/bridge/router-step.patch deploy/bridge/send-label.patch deploy/bridge/submission.patch /tmp/
 RUN echo '306eebd8f6a2a6d0fcd5c2d74c543c37f308065818c22a2ba5b7a604cd2a9c8e  src/driver/chatgpt.ts' | sha256sum -c - \
  && echo 'd156b2b674e4d65e217a839812f9a743b1b07fbb898998f49f603774947bd9a3  src/main.ts' | sha256sum -c - \
  && echo '30bdbb59c1dd429f630c38622741e11cd6a09f33e963247d3c98a5cc70416b47  src/bridge/loop.ts' | sha256sum -c - \
@@ -29,7 +29,8 @@ RUN echo '306eebd8f6a2a6d0fcd5c2d74c543c37f308065818c22a2ba5b7a604cd2a9c8e  src/
  && patch --batch --fuzz=0 -p1 < /tmp/shutdown.patch \
  && patch --batch --fuzz=0 -p1 < /tmp/router-step.patch \
  && patch --batch --fuzz=0 -p1 < /tmp/send-label.patch \
- && rm /tmp/read-page.patch /tmp/idle-control.patch /tmp/shutdown.patch /tmp/router-step.patch /tmp/send-label.patch \
+ && patch --batch --fuzz=0 -p1 < /tmp/submission.patch \
+ && rm /tmp/read-page.patch /tmp/idle-control.patch /tmp/shutdown.patch /tmp/router-step.patch /tmp/send-label.patch /tmp/submission.patch \
  && npm ci --ignore-scripts --omit=dev --no-audit --no-fund
 COPY deploy/bridge/runtime/ /app/deployment/
 COPY deploy/bridge/supervise.py deploy/bridge/health.py deploy/bridge/bridge deploy/bridge/router /opt/bridge/

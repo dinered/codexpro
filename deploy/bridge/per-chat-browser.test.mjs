@@ -27,7 +27,7 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
       let raw = ''; for await (const chunk of request) raw += chunk;
       const data = JSON.parse(raw), id = data.id || randomUUID();
       const answers = conversations.get(id) ?? [];
-      answers.push(`Reply for ${data.text}`); conversations.set(id, answers); records.push({id, text: data.text});
+      answers.push({key: randomUUID(), user: data.text, answer: `Reply for ${data.text}`}); conversations.set(id, answers); records.push({id, text: data.text});
       response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({id, answers})); return;
     }
     const id = request.url?.match(/^\/c\/([a-zA-Z0-9_-]+)$/)?.[1];
@@ -37,7 +37,7 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
       <script>
       let answers=${JSON.stringify(conversations.get(id) ?? [])};
       const turns=document.querySelector('#turns'),composer=document.querySelector('#composer'),stop=document.querySelector('#stop');
-      function render(){turns.textContent='';for(const text of answers){const turn=document.createElement('div');turn.className='turn';const answer=document.createElement('p');answer.className='answer';answer.textContent=text;turn.append(answer);turns.append(turn);}}render();
+      function render(){turns.textContent='';for(const row of answers){const turn=document.createElement('div');turn.className='turn';turn.setAttribute('data-turn-key',row.key);const user=document.createElement('div');user.setAttribute('data-user-message-bubble','');user.textContent=row.user;const answer=document.createElement('p');answer.className='answer';answer.textContent=row.answer;turn.append(user,answer);turns.append(turn);}}render();
       composer.addEventListener('input',()=>document.querySelector('#send').setAttribute('aria-label',composer.innerText.trim()?'Send':'Start Voice'));
       composer.addEventListener('keydown',async e=>{if(e.key!=='Enter'||e.shiftKey)return;e.preventDefault();stop.hidden=false;
         const data=await(await fetch('/message',{method:'POST',body:JSON.stringify({id:location.pathname.split('/c/')[1],text:composer.innerText})})).json();
@@ -49,7 +49,7 @@ test('two native Paseo conversations retain isolated Chrome tabs across cancel, 
   assert.equal(new URL(origin).hostname, '127.0.0.1');
   const profilePath = join(root, 'selectors.json');
   await writeFile(profilePath, JSON.stringify({platform: 'local-only', domain: origin, start_url: origin, network_probe: false,
-    selectors: {composer: '#composer', turn: '.turn', answer: '.answer', stop_button: '#stop', send_button: deployedProfile.selectors.send_button, idle_button: deployedProfile.selectors.idle_button}}));
+    selectors: {composer: '#composer', turn: '.turn', answer: '.answer', user_bubble: deployedProfile.selectors.user_bubble, stop_button: '#stop', send_button: deployedProfile.selectors.send_button, idle_button: deployedProfile.selectors.idle_button}}));
   const cdp = process.env.BRIDGE_CDP_URL ?? 'http://127.0.0.1:9222';
   const browser = await chromium.connectOverCDP(cdp);
   let child, connection;

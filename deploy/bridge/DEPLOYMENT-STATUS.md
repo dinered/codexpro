@@ -1,5 +1,10 @@
 # Deployed runtime; consecutive-turn acceptance failed — 2026-10-24
 
+**Source checkpoint 2026-10-25:** [inventory and candidate](WORK-ITEMS-20261025.md).
+Draft MR !22 now carries uninstalled corrections for #6/#7. The latest task
+handoff records the router paused and an unresolved cancel-only queue item;
+the running-state observations below are historical, not a fresh health check.
+
 **Open defect:** a later message remained in the Chrome composer while Paseo
 completed its turn with the previous assistant answer. The first successful
 single-turn receipt does not establish reliable consecutive-message operation.

@@ -4,6 +4,7 @@ import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {rename, utimes} from 'node:fs/promises';
 import {cancel, json, put, ready, register, validKey} from './protocol.ts';
+import {messageText} from './message-text.ts';
 const capabilities = ['prompt.message', 'session.persistence'] as const;
 const models = [{id: 'chatgpt', label: 'ChatGPT (постоянная вкладка Chrome)'}];
 type Options = {root?: string; pollMs?: number; pulseMs?: number; heartbeatTtlMs?: number; writeTask?: typeof put; registerChat?: typeof register};
@@ -51,13 +52,16 @@ function connection(root: string, supported: string[], options: Options): Provid
     if (session.active) return reject('Previous turn is still active');
     if (prompt.delivery === 'steer' || prompt.input.type !== 'message' || prompt.input.content.some(part => part.type !== 'text') || prompt.outputSchema) return reject('This provider accepts ordinary text messages only');
     const text = prompt.input.content.map(part => part.type === 'text' ? part.text : '').join('\n');
-    if (!text.trim()) return reject('Message is empty');
+    let taskText: string;
+    try { taskText = messageText(text, prompt.clientMessageId); }
+    catch (error) { return reject(error instanceof Error ? error.message : 'Invalid message envelope'); }
+    if (!taskText.trim()) return reject('Message is empty');
     if (!await ready(root, heartbeatTtl)) return reject('Browser bridge is stopped; complete manual login and start it');
     if (closed || session.active || sessions.get(sessionId) !== session) return reject('Session changed while preparing the turn');
     const active: Active = {turnId: randomUUID(), id: '', traceId: '', dir: '', deadline: Date.now() + 35 * 60_000, cancelRequested: false};
     session.active = active;
     try {
-      Object.assign(active, await (options.writeTask ?? put)(root, session.key, text));
+      Object.assign(active, await (options.writeTask ?? put)(root, session.key, taskText));
       if (closed || session.active !== active) { await cancel(active.dir); return; }
       if (active.cancelRequested) await cancel(active.dir);
       emit({type: 'timeline.item', sessionId, item: {type: 'user_message', id: `user:${active.turnId}`, text, clientMessageId: prompt.clientMessageId}});

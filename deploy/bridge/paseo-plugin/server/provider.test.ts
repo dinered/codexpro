@@ -29,6 +29,53 @@ async function fixture() {
 function message(sessionId: string, id: string, text = id): ProviderInput {
   return {type: 'session.prompt', sessionId, prompt: {clientMessageId: id, delivery: 'auto', input: {type: 'message', content: [{type: 'text', text}]}}};
 }
+// Golden wire fixtures from Paseo 0.12 prepareAgentMessage/formatAgentMessage.
+function envelope(id: string, kind: string, text: string) {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  const source = kind === 'user-message' ? '' : ' source-agent-id="synthetic-agent" source-agent-title="Synthetic sender"';
+  const event = kind === 'agent-notification' ? ' event="finished"' : '';
+  return `<paseo-system version="1" kind="${kind}"${source} message-id="${id}"${event}>\n${escaped}\n</paseo-system>`;
+}
+test('only conversational text enters V3 tasks; native echoes retain envelope provenance', async () => {
+  const literal = envelope('literal-id', 'agent-message', 'Human typed this literally');
+  const legacy = '<paseo-system>\nHuman typed this too\n</paseo-system>';
+  const samples = [
+    {id: 'plain', raw: '  Ordinary <human> & text\nsecond line  ', expected: '  Ordinary <human> & text\nsecond line  '},
+    {id: 'agent', raw: envelope('agent', 'agent-message', 'Body <only> & literal &lt;'), expected: 'Body <only> & literal &lt;'},
+    {id: 'literal', raw: envelope('literal', 'user-message', literal), expected: literal},
+    {id: 'legacy-literal', raw: envelope('legacy-literal', 'user-message', legacy), expected: legacy},
+    {id: 'similar', raw: 'Example: <paseo-system kind="agent-message">text</paseo-system>', expected: 'Example: <paseo-system kind="agent-message">text</paseo-system>'},
+  ];
+  for (const {id, raw, expected} of samples) {
+    const f = await fixture();
+    try {
+      const a = await f.open('A'); await f.send(message('A', id, raw));
+      await waitUntil(() => f.events.some(e => e.type === 'session.turn' && e.state === 'started'));
+      const key = (a.persistence.data as {chatKey: string}).chatKey;
+      const spool = join(f.root, 'chats', key, 'spool');
+      const [dir] = await readdir(spool);
+      const task = JSON.parse(await readFile(join(spool, dir!, 'task.json'), 'utf8'));
+      assert.equal(task.text, expected); assert.equal(task.v, 3);
+      const echo = f.events.find(e => e.type === 'timeline.item' && e.item.type === 'user_message');
+      assert.ok(echo?.type === 'timeline.item' && echo.item.type === 'user_message');
+      assert.equal(echo.item.text, raw);
+      await atomic(join(spool, dir!, 'result.json'), {status: 'ok', traceId: task.traceId, markdown: 'Synthetic reply'});
+      await waitUntil(() => f.events.some(e => e.type === 'session.turn' && e.state === 'completed'));
+    } finally { await f.connection.close(); }
+  }
+});
+test('agent/system notifications and mismatched envelope identities create no task', async () => {
+  for (const raw of [envelope('notice', 'agent-notification', 'Finished'), '<paseo-system>\nScheduled notification\n</paseo-system>', envelope('other-id', 'agent-message', 'Wrong identity')]) {
+    const f = await fixture();
+    try {
+      const a = await f.open('A'); await f.send(message('A', 'notice', raw));
+      await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result'));
+      assert.equal(f.events.filter(e => e.type === 'session.turn' || e.type === 'timeline.item').length, 0);
+      const key = (a.persistence.data as {chatKey: string}).chatKey;
+      assert.deepEqual(await readdir(join(f.root, 'chats', key, 'spool')), []);
+    } finally { await f.connection.close(); }
+  }
+});
 test('two simultaneous Paseo chats keep independent V3 tasks, results and persistent bindings', async () => {
   const f = await fixture();
   try {

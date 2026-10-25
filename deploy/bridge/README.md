@@ -1,11 +1,16 @@
 # Docker pilot: ordinary Chrome and bridge reference
 
+Source checkpoint 2026-10-25: [existing work items and review candidate](WORK-ITEMS-20261025.md).
+Submission attribution (#7) and message-envelope handling (#6) are prepared in
+Draft MR !22; neither is installed or live-accepted. The retained all-in-Paseo
+packaging is a historical alternative; the current target remains sidecars.
+
 Deployed pilot with an open consecutive-message defect: an unsubmitted draft
 can receive the preceding assistant answer in Paseo. See
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) and
 [the incident record](INCIDENT-STALE-ANSWER.md) for the current limits and evidence.
 Reference source is
-reference commit `9c556b1833cdad6589c85506605cd2ea4d156882`. The snapshot under
+the reviewed v3.2.1 import (`58bd57c`, GitLab MR !15). The snapshot under
 `docs/mydocs/z.ai/download/bridge-reference` stays unchanged. Runtime overlays make `readPage` self-contained when Playwright serializes
 it and disconnect the bridge-owned CDP connection when the process completes.
 Chrome and its operator tabs remain open independently of bridge shutdown.
