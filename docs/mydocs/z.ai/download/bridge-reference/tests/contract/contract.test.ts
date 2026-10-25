@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { ManualClock } from "../../src/core/clock.ts";
@@ -19,7 +21,7 @@ import { Bridge } from "../../src/bridge/loop.ts";
 import type { CrashPoint } from "../../src/bridge/turn.ts";
 import { PluginClient } from "../../plugin-client/client.ts";
 import { testConfig } from "../helpers/harness.ts";
-import { readResult } from "../../src/protocol/result.ts";
+import { readResult, ackResult } from "../../src/protocol/result.ts";
 import { journalSize, journalSend } from "../../src/protocol/journal.ts";
 import { readLatestState, writeState } from "../../src/protocol/state.ts";
 import { createClaim } from "../../src/protocol/claim.ts";
@@ -444,25 +446,123 @@ test("контракт 16: сигнал оператора до отправки
 });
 
 test("контракт 17: клиент ack+dispose сразу — очередь не ждёт ackWait закрытого хода", async () => {
+  // Три детерминированных interleaving штатного ack+dispose (ревью PR #9 P2):
+  //   А «до-опроса»       — клиент подтверждает и удаляет каталог ДО первого
+  //                         ack-опроса моста: waitAck видит только пустоту;
+  //   Б «stat-confirmed»  — dispose между stat каталога (pathExists → true) и
+  //                         записью фазы confirmed: ровно окно гонки turn.ts;
+  //   В «result-фаза»     — dispose между публикацией result.json и записью
+  //                         фазы result: клиент получил status=ok и вправе
+  //                         закрыть ход, мост ещё пишет фазу.
+  // Бюджет второго хода короче ackWait: движок, дожидающийся полного
+  // TURN_ACK_TIMEOUT, в бюджет не укладывается. Точные утверждения: TURN_ACK
+  // именно первого хода, ни одного TURN_ACK_TIMEOUT, ни одного BRIDGE_FATAL.
+  await assertAckDisposeRace("до-опроса");
+  await assertAckDisposeRace("stat-confirmed");
+  await assertAckDisposeRace("result-фаза");
+});
+
+/** Один interleaving контракта 17: свой стенд, свой перехват stat, свои утверждения. */
+async function assertAckDisposeRace(scenario: "до-опроса" | "stat-confirmed" | "result-фаза"): Promise<void> {
   const ctx = await makeCtx({ generationMs: 100 });
+  // ackWait заметно больше бюджета второго хода: старое ожидание полного
+  // тайм-аута не проходит утверждение «второй ход исполнен» (ревью PR #9 P2).
+  // Бюджет 8 с покрывает ход с запасом (пауза темпа ≤1 с + окно стабильности
+  // детектора ~5 с) и заведомо короче ackWait
+  const ackWaitMs = 20_000;
+  const secondBudgetMs = 8_000;
   try {
-    // клиент подтверждает и СРАЗУ удаляет каталог — штатный путь референс-клиента
     const first = await ctx.client.put("первый ход", ALIVE);
-    const run = bridgeFor(ctx);
-    await pump(ctx, async () => (await readResult(join(ctx.root, first.id))) !== null);
-    const got = await ctx.client.waitResult(first.id, 30_000);
-    assert.equal(got?.status, "ok");
-    await ctx.client.dispose(first.id); // ack был внутри waitResult; каталог удалён
-    // мост обязан распознать подтверждение (ack или удаление каталога после ack)
-    // и продолжить очередь; старое поведение — висеть до ackWaitMs и дать
-    // TURN_ACK_TIMEOUT по уже закрытому ходу
-    const second = await ctx.client.put("второй ход сразу", ALIVE);
-    const ok = await pump(ctx, async () => (await readResult(join(ctx.root, second.id))) !== null, 120_000);
-    assert.ok(ok, "второй ход не исполнен — мост застрял на закрытом ходе");
-    assert.ok(ctx.lines.some((line) => line.includes("TURN_ACK")), "подтверждение первого хода не распознано");
-    assert.equal(ctx.driver.sendCount, 2);
-    await stopBridge(ctx, run);
+    const dir = join(ctx.root, first.id);
+    const claimPath = join(dir, "claim.1");
+    const run = bridgeFor(ctx, undefined, { ackWaitMs });
+
+    // Детерминированный перехват stat (как в ревью-скрипте): в выбранной точке
+    // клиент штатно делает ack → dispose. Условие срабатывания отделяет нужный
+    // вызов от всех прочих stat — перехват срабатывает ровно один раз.
+    const nativeStat = fsp.stat.bind(fsp) as (path: unknown, ...rest: unknown[]) => Promise<unknown>;
+    let disposed = false;
+    const ackExists = async (): Promise<boolean> => {
+      try {
+        await nativeStat(join(dir, "result.ack"));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const resultExists = async (): Promise<boolean> => {
+      try {
+        await nativeStat(join(dir, "result.json"));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const disposeNow = async (): Promise<void> => {
+      await ackResult(dir); // штатный порядок протокола: ack → dispose (birdview §2)
+      await ctx.client.dispose(first.id);
+      disposed = true;
+    };
+    const intercept = async (path: unknown, ...rest: unknown[]): Promise<unknown> => {
+      const matches =
+        typeof path === "string" &&
+        ((scenario === "до-опроса" && path === join(dir, "result.ack") && (await resultExists())) ||
+          (scenario === "stat-confirmed" && path === dir && (await ackExists())) ||
+          (scenario === "result-фаза" && path === claimPath && (await resultExists())));
+      if (!matches) return nativeStat(path, ...rest);
+      if (scenario === "до-опроса") {
+        // dispose ДО опроса: мост увидит только исчезнувший каталог
+        await disposeNow();
+        return nativeStat(path).catch(() => {
+          throw Object.assign(new Error("result.ack отсутствует"), { code: "ENOENT" });
+        });
+      }
+      // dispose между stat и следующим await моста: stat вернёт «каталог был»,
+      // а все последующие проверки увидят пустоту
+      const info = await nativeStat(path);
+      await disposeNow();
+      return info;
+    };
+    fsp.stat = intercept as typeof fsp.stat;
+    syncBuiltinESMExports();
+
+    try {
+      await pump(ctx, async () => (await readResult(dir)) !== null);
+      if (scenario === "stat-confirmed") {
+        // штатный порядок: клиент сначала читает и ПОДТВЕРЖДАЕТ результат, мост
+        // видит ack и идёт писать фазу confirmed — dispose встанет ровно между
+        // stat каталога и следующей проверкой (ревью PR #9 P1, turn.ts)
+        const confirmed = await ctx.client.waitResult(first.id, 5_000);
+        assert.equal(confirmed?.status, "ok", "сценарий stat-confirmed: клиент не получил результат");
+      }
+      assert.ok(await pump(ctx, () => disposed, 5_000), `сценарий ${scenario}: перехват не сработал`);
+
+      // мост обязан распознать подтверждение (ack или удаление каталога после ack)
+      // и продолжить очередь; фатального останова быть не должно ни в каком из сценариев
+      const second = await ctx.client.put("второй ход сразу", ALIVE);
+      const ok = await pump(ctx, async () => (await readResult(join(ctx.root, second.id))) !== null, secondBudgetMs);
+      assert.ok(ok, `сценарий ${scenario}: второй ход не исполнен за ${secondBudgetMs} мс (бюджет короче ackWait)`);
+      const got = await readResult(join(ctx.root, second.id));
+      assert.equal(got?.status, "ok");
+      assert.equal(ctx.driver.sendCount, 2);
+      assert.ok(
+        ctx.lines.some((line) => line.includes("TURN_ACK ") && line.includes(first.id)),
+        `сценарий ${scenario}: подтверждение первого хода не распознано точным событием TURN_ACK`,
+      );
+      assert.ok(
+        !ctx.lines.some((line) => line.includes("TURN_ACK_TIMEOUT")),
+        `сценарий ${scenario}: закрытый ход дождался TURN_ACK_TIMEOUT — мост ждал ackWait`,
+      );
+      assert.ok(
+        !ctx.lines.some((line) => line.includes("BRIDGE_FATAL")),
+        `сценарий ${scenario}: штатный ack+dispose остановил мост:\n${ctx.lines.filter((line) => line.includes("BRIDGE_FATAL")).join("\n")}`,
+      );
+    } finally {
+      fsp.stat = nativeStat as unknown as typeof fsp.stat;
+      syncBuiltinESMExports();
+      await stopBridge(ctx, run);
+    }
   } finally {
     await cleanup(ctx);
   }
-});
+}

@@ -206,7 +206,11 @@ class TurnEngine {
     }
     const written = await writeResult(this.dir, { status: "ok", markdown: answer, traceId: task.traceId });
     if (!written) throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, "результат уже создан другим исполнителем", false);
-    await this.toPhase("result");
+    // Результат опубликован: клиент получил status=ok и вправе ack+dispose в любой момент,
+    // в том числе между любыми двумя fs-операциями ниже. Финализирующие фазы
+    // переносят штатное исчезновение каталога как завершение хода (доработка
+    // ревью PR #9 P1); перехват эпохи при живом каталоге остаётся фатальным.
+    await this.toPhaseFinal("result");
     this.deps.pacer.recordSuccess();
     await this.deps.metrics.record({ kind: "ok", ms: this.deps.clock.now() - startedAt }, task.id).catch(() => {});
     this.log.event(EVENT.TURN_OK, `ответ отдан (${answer.length} символов markdown)`);
@@ -215,11 +219,10 @@ class TurnEngine {
     // ── подтверждён: плагин атомарно переименовал result.json (birdview §2) ──
     if (await this.waitAck()) {
       this.log.event(EVENT.TURN_ACK, "плагин подтвердил результат");
-      // фаза confirmed — только если каталог ещё на месте: плагин вправе удалить
-      // его сразу после ack, и очередь не должна ждать фазу, которую уже некуда писать
-      if (await pathExists(this.dir)) {
-        await this.toPhase("confirmed");
-      }
+      // фаза confirmed — через финализирующую запись: плагин вправе удалить
+      // каталог сразу после ack (birdview §2), и исчезновение каталога между
+      // проверкой и записью фазы — завершение хода, а не утрата владения
+      await this.toPhaseFinal("confirmed");
     } else if (!this.deps.stop.stopped) {
       this.log.event(EVENT.TURN_ACK_TIMEOUT, `нет result.ack за ${this.cfg.ackWaitMs / 1000} с — каталог хода оставлен плагину`);
     }
@@ -242,6 +245,46 @@ class TurnEngine {
       throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `владение утрачено при записи фазы ${phase}`, false);
     }
     this.log.event(EVENT.TURN_PHASE, `фаза: ${phase}`, { phase });
+  }
+
+  /**
+   * Финализирующая фаза — пишется ПОСЛЕ публикации result.json (доработка ревью
+   * PR #9 P1). Клиент получил статус и вправе ack+dispose в любой момент, поэтому
+   * штатное исчезновение каталога (ENOENT) в этой зоне — завершение хода: фазу
+   * уже некуда писать, ответ доставлен. true — фаза записана; false — каталог
+   * удалён плагином после ack, ход завершён без записи фазы.
+   *
+   * Один stat ничего не гарантирует: клиент успевает удалить каталог между
+   * любыми двумя операциями, поэтому исчезновение проверяется заново на каждом
+   * шаге (перед записью, в ошибке записи, при повторной проверке владения), а не
+   * единожды заранее. Реальные ошибки EACCES/EIO остаются наружу — spool
+   * недоступен (birdview §3); перехват эпохи при живом каталоге остаётся
+   * фатальным OWNERSHIP_LOST; удалённый spool не пересоздаётся.
+   */
+  private async toPhaseFinal(phase: Phase): Promise<boolean> {
+    if (!(await pathExists(this.dir))) return false; // каталог удалён до фазы
+    if (!(await stillOwned(this.dir, this.epoch))) {
+      // наш claim исчез, пока мы проверяли: каталог могли удалить (штатно) или
+      // перехватить (фатально) — различает только повторная проверка каталога
+      if (!(await pathExists(this.dir))) return false;
+      throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `эпоха ${this.epoch} больше не максимальная при фазе ${phase}`, false);
+    }
+    this.deps.crash?.("before-state-write");
+    try {
+      await writeState(this.dir, this.epoch, phase);
+    } catch (error) {
+      // каталог исчез ровно между проверкой и open tmp — это ENOENT с каталогом,
+      // которого больше нет; повторная проверка отделяет штатное удаление от spool
+      if (isErrno(error, "ENOENT") && !(await pathExists(this.dir))) return false;
+      throw error;
+    }
+    this.deps.crash?.("after-state-write");
+    if (!(await stillOwned(this.dir, this.epoch))) {
+      if (!(await pathExists(this.dir))) return false; // удалён между записью и проверкой
+      throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `владение утрачено при записи фазы ${phase}`, false);
+    }
+    this.log.event(EVENT.TURN_PHASE, `фаза: ${phase}`, { phase });
+    return true;
   }
 
   /**
