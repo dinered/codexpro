@@ -167,11 +167,15 @@ if grep -q '^gitlab-import ' "$repo/plan"; then
   set_source_branch_retention() {
     [ -n "$open_mr_iid" ] || return 1
     [ "$open_mr_force_remove" = false ] || return 1
-    [ "$open_mr_remove_source" != false ] || return 0
+    # This GitLab returns null for the false/unset API field; the existing glab
+    # view normalizes that state to false. Only an explicit true is unsafe.
+    case "$open_mr_remove_source" in false|null) return 0;; esac
     printf 'url = "%s/%s"\nheader = "PRIVATE-TOKEN: %s"\nrequest = "PUT"\nform-string = "remove_source_branch=false"\nfail\nsilent\nshow-error\noutput = "%s"\n' \
       "$mr_api_url" "$open_mr_iid" "$GITLAB_SYNC_TOKEN" "$repo/update-mr.json" | curl -K - || return 1
     read_open_mr || return 1
-    [ "$open_mr_count" = 1 ] && [ "$open_mr_remove_source" = false ] && [ "$open_mr_force_remove" = false ]
+    [ "$open_mr_count" = 1 ] && [ "$open_mr_force_remove" = false ] || return 1
+    case "$open_mr_remove_source" in false|null) return 0;; esac
+    return 1
   }
   read_open_mr || fail 'Не удалось проверить открытый GitLab MR для main import; refs не опубликованы'
   [ "$open_mr_count" -le 1 ] || fail 'Для main import найдено несколько открытых MR; refs не опубликованы'

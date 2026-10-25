@@ -256,11 +256,11 @@ cat > "$TEST_DIR/curl-config"
 output=$(sed -n 's/^output = "\(.*\)"$/\1/p' "$TEST_DIR/curl-config")
 if grep -q '^request = "POST"$' "$TEST_DIR/curl-config"; then
   if [ ! -f "$TEST_DIR/mr-state" ]; then
-    printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":false,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
+    printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
   fi
 fi
 if grep -q '^request = "PUT"$' "$TEST_DIR/curl-config"; then
-  printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":false,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
+  printf '%s\n' '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' > "$TEST_DIR/mr-state"
 fi
 if [ -f "$TEST_DIR/mr-state" ]; then cp "$TEST_DIR/mr-state" "$output"; else printf '[]' > "$output"; fi
 WRAPPER
@@ -286,15 +286,16 @@ grep -q 'Не удалось проверить открытый GitLab MR' "$d/
 eq "$(refs lab)" "$before_lab" 'MR API preflight lab refs'
 eq "$(refs hub)" "$before_hub" 'MR API preflight hub refs'
 mr_curl_fail=0
-mr_apply=1; mr_ok
+mr_apply=1
+if ! run_mr; then cat "$d/log"; cat "$d/mr-state"; exit 1; fi
 eq "$(g lab rev-parse refs/heads/main)" "$A" 'import does not write protected main'
 eq "$(g lab rev-parse refs/heads/codexpro-sync/github-main-import)" "$C" 'import branch source SHA'
-eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":false,"force_remove_source_branch":false}' 'one MR created and configured to keep its branch'
+eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' 'one MR created and configured to keep its branch'
 grep -q 'ожидает обычного merge request merge' "$d/log"
 eq "$(g lab rev-parse refs/heads/lab-only)" "$A" 'other GitLab head preserved'
 eq "$(g hub rev-parse refs/heads/github-only)" "$A" 'other GitHub head preserved'
 mr_ok
-eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":false,"force_remove_source_branch":false}' 'repeated pending run reuses the same MR'
+eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' 'repeated pending run reuses the same MR'
 pass 'GitHub main import uses stable reviewed branch and keeps protected main unchanged'
 
 put hub refs/heads/main "$D"
@@ -309,7 +310,7 @@ rm -f "$d/mr-state"
 mr_ok
 eq "$(g lab rev-parse refs/heads/main)" "$D" 'protected main unchanged before MR merge'
 eq "$(g lab rev-parse refs/heads/codexpro-sync/github-main-import)" "$E" 'existing branch updated before fallback MR creation'
-eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":false,"force_remove_source_branch":false}' 'fallback MR creation is idempotent for existing branch'
+eq "$(cat "$d/mr-state")" '{"iid":1,"web_url":"http://gitlab.test/project/-/merge_requests/1","should_remove_source_branch":null,"force_remove_source_branch":false}' 'fallback MR creation is idempotent for existing branch'
 pass 'existing import branch without an open MR recreates the reviewed MR after FF'
 
 g lab update-ref refs/heads/main "$E"
