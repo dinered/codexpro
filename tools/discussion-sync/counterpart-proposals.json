@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "readOnly": true,
+  "sourceInventory": {
+    "githubIssues": 8,
+    "githubPullRequests": 3,
+    "gitlabIssues": 14,
+    "gitlabMergeRequests": 17
+  },
+  "rows": [
+    {
+      "sourceService": "github",
+      "sourceKind": "pull_request",
+      "sourceId": 10,
+      "sourceState": "merged",
+      "sourceTitle": "Anti-bot improvements У-1..У-7: resistance detection, metrics, chunked input (v3.2.0)",
+      "sourceUrl": "https://github.com/dinered/codexpro/pull/10",
+      "counterpartPlan": "create attributed GitLab informational record; no native merged MR; known omnibus/contextual MRs excluded",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "issue",
+      "sourceId": 1,
+      "sourceState": "closed",
+      "sourceTitle": "Рассмотреть варианты интеграции codexpro в paseo",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/work_items/1",
+      "counterpartPlan": "create attributed GitHub informational issue unless a verified existing counterpart is identified",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "issue",
+      "sourceId": 2,
+      "sourceState": "closed",
+      "sourceTitle": "Учебный плагин-провайдер Paseo: codexpro как воркер",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/work_items/2",
+      "counterpartPlan": "create attributed GitHub informational issue unless a verified existing counterpart is identified",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "issue",
+      "sourceId": 3,
+      "sourceState": "opened",
+      "sourceTitle": "Живые тесты под присмотром: ChatGPT + CodexPro (ct116), Playwright в harness-home",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/work_items/3",
+      "counterpartPlan": "create attributed GitHub informational issue unless a verified existing counterpart is identified",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "issue",
+      "sourceId": 4,
+      "sourceState": "closed",
+      "sourceTitle": "Двусторонняя синхронизация main: GitLab ai/codexpro ⇄ GitHub dinered/codexpro",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/work_items/4",
+      "counterpartPlan": "create attributed GitHub informational issue unless a verified existing counterpart is identified",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "issue",
+      "sourceId": 5,
+      "sourceState": "closed",
+      "sourceTitle": "Вернуть в GitLab main коммит 063e007 с GitHub",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/work_items/5",
+      "counterpartPlan": "create attributed GitHub informational issue unless a verified existing counterpart is identified",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "issue",
+      "sourceId": 6,
+      "sourceState": "opened",
+      "sourceTitle": "Передавать в ChatGPT текст сообщения без служебной метадаты агентов Paseo",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/work_items/6",
+      "counterpartPlan": "create attributed GitHub informational issue unless a verified existing counterpart is identified",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 1,
+      "sourceState": "merged",
+      "sourceTitle": "Рассмотреть варианты интеграции codexpro в paseo",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/1",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 10,
+      "sourceState": "merged",
+      "sourceTitle": "Синхронизация всех Git-веток и тегов с GitHub без перезаписи",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/10",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 11,
+      "sourceState": "merged",
+      "sourceTitle": "Document unconfirmed submission and stale answer delivery",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/11",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 14,
+      "sourceState": "merged",
+      "sourceTitle": "Preserve collaboration branch histories after GitHub delivery",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/14",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 15,
+      "sourceState": "merged",
+      "sourceTitle": "Synchronize reviewed GitHub PR8, PR9 and PR10",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/15",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 16,
+      "sourceState": "merged",
+      "sourceTitle": "Route GitHub main sync through a reviewed MR",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/16",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 17,
+      "sourceState": "opened",
+      "sourceTitle": "Add read-only discussion sync planner",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/17",
+      "counterpartPlan": "propose native GitHub PR using corresponding refs if available",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 2,
+      "sourceState": "merged",
+      "sourceTitle": "Учебный плагин-провайдер Paseo: codexpro как воркер",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/2",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 3,
+      "sourceState": "closed",
+      "sourceTitle": "Draft: Живые тесты под присмотром: ChatGPT + CodexPro (ct116), Playwright в harness-home",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/3",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 4,
+      "sourceState": "merged",
+      "sourceTitle": "Двусторонняя синхронизация main: GitLab ai/codexpro ⇄ GitHub dinered/codexpro",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/4",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 5,
+      "sourceState": "merged",
+      "sourceTitle": "Вернуть в GitLab main коммит 063e007 с GitHub",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/5",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 6,
+      "sourceState": "merged",
+      "sourceTitle": "Отвязать инструкции от прежнего governance",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/6",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 7,
+      "sourceState": "merged",
+      "sourceTitle": "Reconcile GitLab and GitHub main without rewriting history",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/7",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 8,
+      "sourceState": "merged",
+      "sourceTitle": "Review authored documentation revisions from Mac",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/8",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    },
+    {
+      "sourceService": "gitlab",
+      "sourceKind": "merge_request",
+      "sourceId": 9,
+      "sourceState": "merged",
+      "sourceTitle": "Deploy persistent Chrome tabs and protocol-v3 provider for Paseo",
+      "sourceUrl": "http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/9",
+      "counterpartPlan": "create attributed GitHub informational record; do not claim a native merged PR or replay review votes",
+      "automaticMutation": false
+    }
+  ]
+}

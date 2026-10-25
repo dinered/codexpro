@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "approvedScope": "FirstMate 2026-10-25 initial 19 mapped comment backfill; new source records require plan review",
+  "rows": [
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:1:comment:6390796104",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 1,
+      "sourceCommentId": 6390796104
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:2:comment:6390796454",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 2,
+      "sourceCommentId": 6390796454
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:3:comment:6390796820",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 3,
+      "sourceCommentId": 6390796820
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:4:comment:6390797150",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 4,
+      "sourceCommentId": 6390797150
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:5:comment:6390797520",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 5,
+      "sourceCommentId": 6390797520
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:6:comment:6390797900",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 6,
+      "sourceCommentId": 6390797900
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-issue:7:comment:6390798238",
+      "sourceService": "github",
+      "sourceObjectKind": "github-issue",
+      "sourceObjectId": 7,
+      "sourceCommentId": 6390798238
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:8:comment:6390815877",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 8,
+      "sourceCommentId": 6390815877
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:8:comment:6394330726",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 8,
+      "sourceCommentId": 6394330726
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:8:comment:6394468309",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 8,
+      "sourceCommentId": 6394468309
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:9:comment:6390867629",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 9,
+      "sourceCommentId": 6390867629
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:9:comment:6394330422",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 9,
+      "sourceCommentId": 6394330422
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:9:comment:6394468435",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 9,
+      "sourceCommentId": 6394468435
+    },
+    {
+      "originId": "github.com/dinered/codexpro:github-pr:9:comment:6394599198",
+      "sourceService": "github",
+      "sourceObjectKind": "github-pr",
+      "sourceObjectId": 9,
+      "sourceCommentId": 6394599198
+    },
+    {
+      "originId": "gitlab.home.arpa/ai-company/codexpro:gitlab-issue:7:comment:7145",
+      "sourceService": "gitlab",
+      "sourceObjectKind": "gitlab-issue",
+      "sourceObjectId": 7,
+      "sourceCommentId": 7145
+    },
+    {
+      "originId": "gitlab.home.arpa/ai-company/codexpro:gitlab-issue:7:comment:7161",
+      "sourceService": "gitlab",
+      "sourceObjectKind": "gitlab-issue",
+      "sourceObjectId": 7,
+      "sourceCommentId": 7161
+    },
+    {
+      "originId": "gitlab.home.arpa/ai-company/codexpro:gitlab-issue:7:comment:7162",
+      "sourceService": "gitlab",
+      "sourceObjectKind": "gitlab-issue",
+      "sourceObjectId": 7,
+      "sourceCommentId": 7162
+    },
+    {
+      "originId": "gitlab.home.arpa/ai-company/codexpro:gitlab-issue:7:comment:7163",
+      "sourceService": "gitlab",
+      "sourceObjectKind": "gitlab-issue",
+      "sourceObjectId": 7,
+      "sourceCommentId": 7163
+    },
+    {
+      "originId": "gitlab.home.arpa/ai-company/codexpro:gitlab-issue:7:comment:7164",
+      "sourceService": "gitlab",
+      "sourceObjectKind": "gitlab-issue",
+      "sourceObjectId": 7,
+      "sourceCommentId": 7164
+    }
+  ]
+}
