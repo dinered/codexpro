@@ -10,6 +10,11 @@ children = []
 stopping = False
 exit_code = 0
 chrome_process = None
+display = os.environ.get("DISPLAY", ":0")
+cdp_port = int(os.environ.get("CHROME_CDP_PORT", "9222"))
+vnc_port = int(os.environ.get("VNC_PORT", "5900"))
+viewer_port = int(os.environ.get("NOVNC_PORT", "6080"))
+profile = os.environ.get("CHROME_PROFILE", "/home/node/profile")
 
 
 def stop(_sig=None, _frame=None):
@@ -42,20 +47,20 @@ def wait_ready(check, seconds=30):
 
 
 def cdp_ready():
-    with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=1) as r:
+    with urllib.request.urlopen(f"http://127.0.0.1:{cdp_port}/json/version", timeout=1) as r:
         return r.status == 200
 
 
 try:
     # VNC and CDP are loopback-only inside this container. noVNC is reachable
-    # only through Docker's explicit host-loopback mapping and existing SSH.
-    start(["Xtigervnc", ":0", "-geometry", "1440x900", "-depth", "24",
-           "-rfbport", "5900", "-SecurityTypes", "None", "-localhost", "yes",
+    # through the explicitly reviewed Docker host port mapping.
+    start(["Xtigervnc", display, "-geometry", "1440x900", "-depth", "24",
+           "-rfbport", str(vnc_port), "-SecurityTypes", "None", "-localhost", "yes",
            "-AlwaysShared", "-nolisten", "tcp"])
-    wait_ready(lambda: os.path.exists("/tmp/.X11-unix/X0"))
+    wait_ready(lambda: os.path.exists("/tmp/.X11-unix/X" + display.split(":")[-1]))
     start(["openbox"])
-    chrome = ["google-chrome-stable", "--user-data-dir=/home/node/profile",
-              "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
+    chrome = ["google-chrome-stable", "--user-data-dir=" + profile,
+              "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=" + str(cdp_port),
               "--no-first-run", "--no-default-browser-check", "--window-size=1440,900"]
     if os.environ.get("CHROME_PROXY_SERVER"):
         chrome.append("--proxy-server=" + os.environ["CHROME_PROXY_SERVER"])
@@ -64,7 +69,7 @@ try:
     # Basic TCP proxy/static web only; optional websockify auth/token plugins
     # and their third-party dependencies are not installed or enabled.
     start(["python3", "-m", "websockify", "--web=/opt/novnc",
-           "6080", "127.0.0.1:5900"])
+           str(viewer_port), f"127.0.0.1:{vnc_port}"])
     while not stopping:
         if any(p.poll() is not None for p in children):
             raise RuntimeError("browser component exited; stopping this instance")

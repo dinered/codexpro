@@ -1,0 +1,41 @@
+#!/bin/bash
+# Preserve Paseo's entrypoint/command; stop our children gracefully on shutdown.
+set -uo pipefail
+if [[ "$(id -u)" = 0 ]]; then exec gosu paseo "$0" "$@"; fi
+export DISPLAY=:92
+export CHROME_PROFILE=/home/paseo/.paseo/codexpro/profile
+export CHROME_CDP_PORT=9223 VNC_PORT=5992 NOVNC_PORT=6081
+export BRIDGE_CDP_URL=http://127.0.0.1:9223
+export BRIDGE_STATE=/home/paseo/.paseo/codexpro
+umask 077
+mkdir -p "$CHROME_PROFILE" "$BRIDGE_STATE/runtime" "$BRIDGE_STATE/control"
+PYTHONPATH=/opt/websockify python3 /opt/codexpro/supervise.py >> "$BRIDGE_STATE/runtime/browser.log" 2>&1 &
+browser_pid=$!
+(
+  for attempt in {1..150}; do
+    if curl -fsS --max-time 1 -o /dev/null "$BRIDGE_CDP_URL/json/version"; then
+      cd /opt/codexpro/app || exit 1
+      exec flock -n -E 75 "$BRIDGE_STATE/control/router.lock" node deployment/router.ts
+    fi
+    sleep 0.2
+  done
+  echo 'Browser readiness timed out; router remains stopped.' >&2
+  exit 1
+) >> "$BRIDGE_STATE/runtime/router.log" 2>&1 &
+router_pid=$!
+/usr/local/bin/paseo-docker-entrypoint "$@" &
+daemon_pid=$!
+cleanup() {
+  trap - EXIT TERM INT
+  kill -TERM "$daemon_pid" 2>/dev/null || true
+  wait "$daemon_pid" 2>/dev/null || true
+  kill -TERM "$router_pid" 2>/dev/null || true
+  wait "$router_pid" 2>/dev/null || true
+  kill -TERM "$browser_pid" 2>/dev/null || true
+  wait "$browser_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+wait "$daemon_pid"
+exit $?
