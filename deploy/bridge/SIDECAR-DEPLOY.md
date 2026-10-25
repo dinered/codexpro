@@ -11,7 +11,7 @@ repository, builds the exact image and writes a non-secret review packet to
 `data/codexpro-deploy-20261024/sidecar-image-review.txt` in the First Mate home.
 It starts no services in prepare mode.
 
-After independent image/config review, run the same helper with
+After checking the exact image/config within the operator work order, run the helper with
 `<full-source-sha> start-browser <reviewed-image-id>`. It verifies source/image
 identity and the existing profile volume before recreating only the scoped
 browser. The viewer is `http://192.168.11.241:6081/vnc.html`. CDP/raw VNC stay
@@ -21,17 +21,26 @@ require explicit operator resume. Keep its dedicated state and browser profile.
 The deployed target-image per-chat fixture, viewer/manual login, DE egress,
 provider/model discovery and shared ready heartbeat have passed. See
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) for exact deployed identities.
-One distinct authorized native message received a real reply in Paseo and
-completed after the router corrections. Later consecutive messages exposed
-stale-answer delivery while the new text remained in the composer. General live
-acceptance is open in [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7);
-that correction is not deployed. Login persistence across a browser
+The `52a07ce` correction for [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7)
+is installed. Two consecutive authorized native messages, including multiline
+input, received distinct expected answers in Chrome and Paseo, with trace-matched
+acknowledgements. The ineffective-second-send case passed in a packaged synthetic
+regression; no uncertain real message was retried. Login persistence across a browser
 restart remains unverified. These updates preserved the browser container ID
 and its existing restart count.
+For a router-only replacement, retain the browser image and container and use
+the prepared immutable override with `up -d --no-deps --no-build --pull never bridge`.
+Render with `--profile bridge config --format json` so the review packet includes
+the opt-in router. Verify fresh ready heartbeat and an empty runnable queue.
+On this host, check state existence through `docker exec -u paseo paseo-beta`,
+rather than changing permissions to traverse the private state from the host user.
+Reuse an existing exact source stage after manifest verification; the prepare
+helper deliberately refuses to overwrite it.
+
 Source CI is a smoke job; it does not perform these deployment checks. The local
 headless per-chat scenario already passed and should not be repeated as a
 substitute for target-image acceptance.
 
 Rollback stops only the new bridge/browser services, preserving their profile
-and state. Never use down-v/prune or remove another service. Mac is installation
-transport/viewer only; it is not needed for the running browser/router.
+and state. Never use down-v/prune or remove another service. Direct `ssh codexpro-vm108` from Paseo is available; Mac and CT107 are not
+needed for this route or for the running browser/router.

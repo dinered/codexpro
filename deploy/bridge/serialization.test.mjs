@@ -10,7 +10,7 @@ const {ChatGptDriver} = await import(pathToFileURL(resolve(root, 'src/driver/cha
 
 test('page evaluator survives browser serialization and reads final answer', async () => {
   const answer = {outerHTML: '<p>local fixture answer</p>'};
-  const turn = {querySelectorAll: () => [answer]};
+  const turn = {getAttribute: () => 'fixture', querySelectorAll: () => [answer]};
   const button = {hidden: false, disabled: false, getAttribute: () => null,
     getClientRects: () => [{}]};
   const document = {querySelector: () => null,
@@ -20,7 +20,8 @@ test('page evaluator survives browser serialization and reads final answer', asy
     `(${fn.toString()})(input)`, {input, document})};
   const driver = new ChatGptDriver(page, {domain: 'http://fixture.local', selectors: {
     turn: '.turn', answer: '.answer', stop_button: '.stop', send_button: '.send'}});
-  assert.deepEqual(JSON.parse(JSON.stringify(await driver.readAnswer())), {
+  const {html, busy, sendIdle} = await driver.readAnswer();
+  assert.deepEqual({html, busy, sendIdle}, {
     html: '<p>local fixture answer</p>', busy: false, sendIdle: true});
 });
 

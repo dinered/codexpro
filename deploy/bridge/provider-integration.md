@@ -59,14 +59,18 @@ results and refusal of cross-chat navigation. No real ChatGPT prompt is
 inferred from synthetic acceptance or plugin installation. Separately, one
 distinct authorized native message received its real assistant reply in Paseo
 and completed with acknowledgement. The supported ordinary input path omitted
-agent provenance, and its exact task text was verified; general agent-message
-metadata filtering remains issue #6.
+agent provenance, and its exact task text was verified. Agent-message metadata
+filtering was subsequently installed from `52a07ce` for issue #6. Both authorized
+test task texts matched their prompts exactly, including multiline input, while
+native timeline provenance remained.
 
-That single-turn result is insufficient for consecutive-message acceptance.
-Subsequent operator use left a new draft in Chrome while Paseo returned the
-previous assistant answer. [Issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7)
-tracks proof of submission and answer ownership for each new turn. No correction
-is deployed; native `idle` and `result.ack` alone do not establish those facts.
+That historical single-turn result was insufficient for consecutive-message
+acceptance. Later operator use exposed stale-answer delivery in
+[issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7). The `52a07ce`
+correction is now installed. Two consecutive authorized messages passed in one
+conversation; DOM user/assistant identities and task-trace acknowledgements were
+checked in addition to native completion. The second message was multiline.
+See [current acceptance evidence](DEPLOYMENT-STATUS.md).
 
 ## Rollback
 
@@ -102,7 +106,8 @@ router/session restart and closed-tab restoration. It also passed against the re
 real-Chrome shutdown fixture passed all three cases; that does not substitute
 for this per-chat acceptance.
 
-After the live bind and new image are reviewed, the supported pinned install is:
+After exact bind/image/source checks within the operator work order, the
+supported pinned install for an unconfigured ID is:
 
 ```sh
 paseo plugin install http://gitlab.home.arpa/ai-company/codexpro.git \
@@ -113,6 +118,16 @@ paseo plugin ls --json
 
 Require the exact plugin running, native provider/catalog discovery and the
 synthetic scenario on the intended daemon. Do not restart Paseo or read/reuse
-its credential stores. The installed provider is pinned to7c53c216a2c7013af8eb44f7476ecc65d0a71d6d;
-its source is unchanged at the deployed e04c76b image revision. Installation
-and model discovery were verified without restarting Paseo.
+its credential stores. The installed provider is pinned to
+`52a07ce6b476526c8dd9ee9a276f530b1f3b8607`. For an existing ID, install refuses
+to overwrite its configuration. Save the old directory-source path, ensure
+provider turns are idle, then use `paseo plugin remove codexpro-browser --json`
+and install the exact new directory under the same ID. Removing this directory
+source configuration preserves its files for rollback. Verify the new path,
+`running` state and model discovery; Paseo need not restart.
+
+The cancelled unacknowledged task was moved to a hash-checked quarantine before
+router startup. No acknowledgement was fabricated, and all 15 old acknowledged
+tasks remained byte-identical. The active task-wide pause was removed by the
+operator; routine reversible work in this authorized scope does not need repeat
+approvals. Existing technical guards and bounded real-message limits remain.

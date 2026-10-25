@@ -1,0 +1,23 @@
+diff --git a/src/driver/chatgpt.ts b/src/driver/chatgpt.ts
+--- a/src/driver/chatgpt.ts
++++ b/src/driver/chatgpt.ts
+@@ -166,1 +166,18 @@
+-  return { html, busy, sendIdle };
++  // Deployment witness for issue #7: stable identities and content in the SAME DOM sample.
++  const rows: {id: string | null; role: "user" | "assistant"; text: string; html: string}[] = [];
++  for (const turn of turns) {
++    const key = turn.getAttribute("data-turn-key");
++    const users = sel.user_bubble ? [...turn.querySelectorAll(sel.user_bubble)] : [];
++    const answers = [...turn.querySelectorAll(sel.answer)];
++    if (users.length) rows.push({id: key ? `${key}:user` : null, role: "user",
++      text: users.map(el => (el as HTMLElement).innerText ?? el.textContent ?? "").join("\n"), html: ""});
++    if (answers.length) rows.push({id: key ? `${key}:assistant` : null, role: "assistant",
++      text: "", html: answers.map(el => el.outerHTML).join("")});
++  }
++  const snapshot = {html, busy, sendIdle, submission: {
++    supported: !!sel.user_bubble,
++    composerEmpty: emptyComposer,
++    composerText: composerText ?? "",
++    rows,
++  }};
++  return snapshot;

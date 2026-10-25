@@ -1,125 +1,119 @@
-# Deployed runtime; consecutive-turn acceptance failed — 2026-10-24
+# Deployed Web Bridge — 2026-10-25
 
-**Open defect:** a later message remained in the Chrome composer while Paseo
-completed its turn with the previous assistant answer. The first successful
-single-turn receipt does not establish reliable consecutive-message operation.
-Track the correction in [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7)
-and see [the incident record](INCIDENT-STALE-ANSWER.md) for evidence, limits and
-acceptance criteria. Runtime readiness and an acknowledgement do not prove that
-the platform accepted a new message or generated an answer for it.
+The submission-attribution and Paseo envelope corrections from source
+`52a07ce6b476526c8dd9ee9a276f530b1f3b8607` are installed. Two consecutive native
+messages in one new ChatGPT conversation passed live acceptance at 16:30 UTC.
+The second message contained a line break. Both received their own new answers
+in Chrome and Paseo, followed by trace-matched protocol acknowledgements.
 
-Browser and router were last verified running on VM108; native provider `codexpro-browser`
-is available in Paseo as **ChatGPT (Chrome)**, model `chatgpt`. A new Paseo
-conversation receives its own persistent Chrome tab. The operator completed
-manual ChatGPT login. Synthetic acceptance submitted no real ChatGPT prompts. The first operator
-message received a reply in Chrome, but exposed a URL-binding race before
-forwarding to Paseo. Router corrections are now deployed. One distinct authorized
-native message in **ChatGPT — рабочий чат** received the answer `работает` in
-Paseo and completed with native status `idle` and protocol acknowledgement.
-Its task text exactly matched ordinary user input, without agent metadata.
-Earlier failed/cancelled messages were retained and were not replayed.
-Subsequent operator use exposed the defect above. The successful single-turn
-evidence is retained; the general acceptance claim is withdrawn.
+This is bounded acceptance. The deliberately ineffective second send is covered
+by a packaged synthetic regression; it was not induced in ChatGPT. See the
+[published acceptance record](evidence/20261025-head52-live.json) and the
+[historical incident](INCIDENT-STALE-ANSWER.md).
 
-- Browser source: `e04c76b0f607c9dbf145b648c38893e1a243857b`.
-- Browser image: `sha256:a36ac8dc2761da676ed9823559b4a5fdd9b0fbfd4dcb7d1c2b69ee1a2d9cc90b`.
-- Router source: `d928d7a0b9c546a9862601437a634ee2a0df630a` (subsequent documentation changes do not change this running image).
-- Router image: `sha256:e4bbe3a1ea90904acb00ee41a61271bd1258dd25508eb98a1f318131de25d345`.
-- Installed provider source: `7c53c216a2c7013af8eb44f7476ecc65d0a71d6d`; provider source unchanged at runtime revision.
+## Installed identities and retained runtime
+
+| Component | Source or immutable identity |
+| --- | --- |
+| Router source | `52a07ce6b476526c8dd9ee9a276f530b1f3b8607` |
+| Router image | `sha256:71d5e66f83290dbe2162598d572913b23f0f0f2a5480b477f49662890e49b31e` |
+| Native provider source | `52a07ce6b476526c8dd9ee9a276f530b1f3b8607` |
+| Browser source, retained | `e04c76b0f607c9dbf145b648c38893e1a243857b` |
+| Browser image, retained | `sha256:a36ac8dc2761da676ed9823559b4a5fdd9b0fbfd4dcb7d1c2b69ee1a2d9cc90b` |
+
+Provider `codexpro-browser`, model `chatgpt`, is running in the existing Paseo.
+The router reports a fresh shared `ready` heartbeat, zero restarts and no OOM.
+Its network is the existing browser namespace, with no published ports and
+restart policy `no`. Memory remains 1280/256 MiB and CPU 0.8/0.2 for browser/router.
+
 - Viewer: http://192.168.11.241:6081/vnc.html?autoconnect=1&resize=scale
-- Profile volume: `codexpro-reference_profile` at `/home/node/profile`.
-- State: host `/opt/stacks/paseo-beta/paseo-home/.paseo/codexpro`, Paseo `/home/paseo/.paseo/codexpro`, router `/data` (only this dedicated RW bind).
+- Profile: `codexpro-reference_profile` at `/home/node/profile`.
+- State: host `/opt/stacks/paseo-beta/paseo-home/.paseo/codexpro`, Paseo
+  `/home/paseo/.paseo/codexpro`, router `/data` as its dedicated RW bind.
+- Direct administration: `ssh codexpro-vm108` from Paseo. Mac and CT107 are not
+  dependencies of this access route or the running bridge.
 
-Target Chrome Stable 156 passed the local two-chat scenario: four loopback
-synthetic sends, cancellation without sending, independent conversations,
-router/session restart and closed-tab recovery. Nonroot validation read 1805
-static files and loaded runtime dependencies. Browser is healthy with one
-historical restart and no OOM; router is running with zero restarts and a fresh
-shared ready heartbeat. Browser container ID and restart count stayed unchanged
-through these router replacements. Its last restart at 17:02:31 UTC predates
-this preparation; the trigger is unknown.
-Country-only container egress returned **DE**. Native plugin/provider/model
-catalogs were checked. No Paseo or logged-in browser restart was needed for
-router activation or the subsequent router-only URL-race fix.
+The browser container ID and its historical restart count of one were preserved.
+Paseo was not restarted. Earlier manual login/viewer and country-only DE egress
+checks are historical evidence; this rollout did not repeat or change them.
+Login persistence across a browser restart remains unverified.
 
-Login persistence across a browser restart has not been verified. The successful
-live message establishes authentication for the current session.
+## Live acceptance and retained data
 
-## Deployed corrections and limited acceptance
+The operator authorized this exact candidate, one reversible queue quarantine
+and two new messages without waiting for FirstMate. FirstMate's review attempt
+ended at its account limit; an independent review is not claimed.
 
-The running router includes the exact `Send` button-label alias and a bounded first-URL
-settling wait: up to two seconds after persisted send intent, with target and
-origin checked on every sample. Only the home page or an exclusively claimed
-canonical conversation may pass. Existing conversation bindings remain immutable;
-login/challenge paths and unsent transitions fail immediately. Rejection diagnostics
-contain reason flags, without conversation URLs or message contents.
+1. `Ответь ровно BRIDGE-CHECK-1` produced `BRIDGE-CHECK-1`.
+2. `Ответь ровно BRIDGE-CHECK-2` followed by a second line,
+   `Это проверка многострочного ввода.`, produced `BRIDGE-CHECK-2`.
 
-Eleven binding/selector tests and deployment TypeScript checking pass. A fresh
-local Chromium fixture passes four synthetic sends across two chats, cancellation
-without sending, router restart and closed-tab recovery, including an intermediate
-`/c/` path on the first send. This reproduces a possible failure mechanism; the
-live failure-time path was not captured and its cause remains unconfirmed.
+Read-only inspection of the new test tab confirmed two user messages and two
+assistant answers, one added turn identity for the second exchange, the same
+Chrome target/conversation, an empty composer, and no visible stop/streaming.
+Both task texts matched the requested prompts exactly, without Paseo delivery
+metadata. The multiline text was intact. Each acknowledgement matched its own
+trace and expected answer. Exactly two real messages were sent, with no retries.
+No older failed or cancelled request was replayed.
 
-Inactive saved tabs are now restored only when their chat has runnable work.
-An old inactive tab on the platform home page therefore does not block a new
-chat at router startup. A pending stale chat still fails closed before sending;
-target/origin/conversation/exclusivity checks remain enforced.
+The unresolved cancel-only item `20261025T120431Z-lcx5ms` was atomically moved
+outside the runnable spool into `quarantine/<chat-key>/<turn-id>` under the
+same state root. Its `task.json`, `alive` and `cancel` retained their hashes.
+No artificial result/acknowledgement was created. All 107 files belonging to the
+15 previously acknowledged tasks remained unchanged.
 
-The completion overlay accepts the current `Start Voice` idle control only when
-it is visible and enabled, the visible composer is empty, and assistant text is
-present. Stable-answer, no-stop and no-streaming checks still apply. The Send
-path remains supported. Seven selector/completion checks and TypeScript pass;
-the actual Chrome 156 image passes the updated two-chat fixture, including
-Voice idle, cancellation, restart, closed-tab recovery and stale-tab negatives.
+## Build and regression evidence
 
-The reviewed guarded helper replaced only the router and passed readiness,
-actual source hashes, exact image/configuration/bind checks, unchanged browser
-identity/restart count, and all five previous acknowledged-turn snapshots.
-The distinct live acceptance then delivered its answer and completed in Paseo.
-Later consecutive-turn evidence shows that completion can also return a stale
-answer when submission is unconfirmed. No correction for that defect has been
-deployed. The cause of the ineffective Enter remains unknown.
-Browser/profile/state, earlier failed turns and paused packaging work remain
-preserved. General agent-message metadata filtering remains separate issue #6;
-ordinary native input was used for this acceptance.
+All 104 source-stage files matched exact Git blobs before building. The image's
+revision label, 16 source hashes and five patched runtime files matched the
+verified source. Nonroot validation read 1813 files, checked entrypoints and
+loaded Node/Python dependencies. Actual Compose rendering included the opt-in
+bridge profile and pinned the candidate by immutable ID.
 
-## Manual takeover and restart behavior
+Seventeen packaged submission/serialization regressions passed inside the new
+image with no network, a read-only root filesystem and temporary test state.
+Earlier exact-source checks remain: 106 reference tests, eight provider tests,
+35 serial deployment tests, 12 focused driver tests and TypeScript. They were
+not rerun merely to repeat a green result. TypeScript also passed in the exact
+persistent provider stage before installation. The earlier parallel
+`ALIVE_EXPIRED` and three pre-existing docs-marker failures remain recorded.
+CI checks source smoke/synchronization, not this live acceptance.
+The alternative all-in-Paseo packaging was not installed.
 
-Browser uses `restart: unless-stopped`; router deliberately uses `restart: no`.
-A router exit, host reboot, or explicit stop requires an explicit router start.
-No automatic challenge retry or queue resumption is promised.
+## Operator workflow and rollback
 
-Before manual browsing/CAPTCHA, stop only the router on VM108:
+Within this operator-authorized task, routine reversible updates and the two
+agreed tests proceed without repeated approval. The obsolete task-wide hold
+was removed from the active brief. Submission/binding/cancel guards, educational
+limits and challenge stops remain. This does not authorize additional unattended
+messages or automatic replay after uncertain sending.
+
+Before manual browsing or CAPTCHA, stop only the router on VM108:
 
 ```sh
 docker stop codexpro-reference-bridge-1
 ```
 
-Complete manual interaction in the viewer. Review retained queue/state before
-resuming; then explicitly start that same router:
+After manual takeover, inspect the retained queue and explicitly resume:
 
 ```sh
 docker start codexpro-reference-bridge-1
 ```
 
-Router readiness is a fresh `state: ready` entry in the shared `router.json`;
-its provider rejects sends while that heartbeat is stale or stopped. Keep the
-profile and state on rollback. Do not remove volumes, clear locks or use down-v.
-Mac is an administration/viewer client, not a runtime dependency.
+The provider rejects messages while the heartbeat is stale or stopped. Rollback
+stops the candidate router, restores the prior immutable router image in a
+stopped state and restores the prior local provider source. Keep the browser,
+profile, histories and quarantine. Never automatically return the quarantined
+item to a running queue or use `down -v`/prune.
 
-## Evidence
+Native plugin install rejects an already configured ID. Replacement removes
+only its configuration before installing the exact staged directory under the
+same ID; old and new source directories are retained. Paseo stays running.
 
-The First Mate record directory `data/codexpro-deploy-20261024/` retains
-`e04c76b-sidecar-image-review.txt`, `router-effective-config.json`,
-`target-per-chat-browser.txt`, `browser-live-readback.json`,
-`browser-egress-country.txt`, `router-container-readback.json` and
-`router-live-readback.json`. Original permission failures and corrected
-archive/validator counterfactuals are preserved alongside the successful results.
-Latest records are `voice-idle-review-packet.json`, `voice-idle-apply-exit.json`,
-`voice-idle-independent-containers.json`, `voice-idle-router-image-files.txt`,
-`voice-idle-history-after.json` and `live-acceptance-voice-idle.json`. The running
-configuration SHA-256 is `fab0cc65c5dbd820c74edb657881e6689c4c691994fcef531832528afee7f24b`;
-override SHA-256 is `4641c6fc46cbdbd9cadac1ad65679790b17bc0948daa390d7babf7d1f0a0a38a`.
-The later read-only observation is `consecutive-send-dom-evidence.json` at
-19:59:16 UTC. It records only message-match flags, counts and sizes; private
-message text and conversation URLs are omitted from the published report.
+Canonical records in `data/codexpro-deploy-20261024/` include
+`head52-image-review-result.json`, `head52-rollout-packet.json`,
+`head52-quarantine-result.json`, `head52-provider-native-replace-events.json`,
+`head52-router-live.json`, `head52-live-acceptance-summary.json` and the guarded
+apply/rollback scripts. Public evidence omits conversation URLs and private
+message contents. Current instructions are in `brief.md`; old paused handoffs
+remain historical records.

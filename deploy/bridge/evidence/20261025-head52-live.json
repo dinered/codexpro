@@ -1,0 +1,37 @@
+{
+  "checkedAt": "2026-10-25T16:30:34.421Z",
+  "source": "52a07ce6b476526c8dd9ee9a276f530b1f3b8607",
+  "image": "sha256:71d5e66f83290dbe2162598d572913b23f0f0f2a5480b477f49662890e49b31e",
+  "result": "PASS",
+  "realMessages": 2,
+  "retries": 0,
+  "taskIds": [
+    "20261025T162708Z-nhafx3",
+    "20261025T162944Z-5w4c4b"
+  ],
+  "taskTextProjection": "PASS",
+  "multilinePreserved": true,
+  "acks": [
+    {
+      "status": "ok",
+      "answer": "BRIDGE-CHECK-1"
+    },
+    {
+      "status": "ok",
+      "answer": "BRIDGE-CHECK-2"
+    }
+  ],
+  "domProof": {
+    "sameTarget": true,
+    "sameConversation": true,
+    "newTurnIdentity": true,
+    "userTurns": 2,
+    "assistantTurns": 2,
+    "composerEmpty": true,
+    "stopVisible": false,
+    "streaming": false
+  },
+  "retainedAcknowledgedTasks": 15,
+  "retainedFilesVerified": 107,
+  "quarantinedFilesPreserved": 3
+}

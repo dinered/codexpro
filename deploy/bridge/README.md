@@ -1,11 +1,15 @@
 # Docker pilot: ordinary Chrome and bridge reference
 
-Deployed pilot with an open consecutive-message defect: an unsubmitted draft
-can receive the preceding assistant answer in Paseo. See
+Deployment checkpoint 2026-10-25: [existing work items](WORK-ITEMS-20261025.md).
+Submission attribution (#7) and message-envelope handling (#6) from `52a07ce`
+are installed. Two consecutive native messages, including multiline input,
+received their own answers in Chrome and Paseo with trace-matched acknowledgements.
+The retained all-in-Paseo packaging is a historical alternative; the deployment
+uses browser/router sidecars and the native Paseo provider. See
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md) and
 [the incident record](INCIDENT-STALE-ANSWER.md) for the current limits and evidence.
 Reference source is
-reference commit `9c556b1833cdad6589c85506605cd2ea4d156882`. The snapshot under
+the reviewed v3.2.1 import (`58bd57c`, GitLab MR !15). The snapshot under
 `docs/mydocs/z.ai/download/bridge-reference` stays unchanged. Runtime overlays make `readPage` self-contained when Playwright serializes
 it and disconnect the bridge-owned CDP connection when the process completes.
 Chrome and its operator tabs remain open independently of bridge shutdown.
@@ -55,7 +59,7 @@ export BRIDGE_VIEWER_BIND_IP=192.168.11.241
 docker compose config --quiet
 docker compose build browser
 # Record immutable image ID and installed Chrome/Node versions before startup.
-# First Mate reviews concrete config/image before the next command.
+# Verify the exact image/config and that startup is within the current work order.
 docker compose up -d --no-build --pull never --wait --wait-timeout 50 browser
 docker compose ps
 docker compose exec -T browser python3 /opt/bridge/health.py
@@ -84,7 +88,7 @@ never point it at old demo/live task directories. Browser health alone is not
 bridge readiness or accepted ChatGPT automation.
 
 ```sh
-# Only after First Mate reviews the candidate and Captain completes login.
+# Within the work order, after image/config/queue checks and manual login.
 docker compose --profile bridge up -d bridge
 docker compose logs --tail=50 bridge
 # Before interacting manually with the remote Chrome:
@@ -123,8 +127,8 @@ sh deploy/bridge/check.sh
 The deployed Chrome Stable156 image and router have verified immutable image
 identity, healthy/running status and the reviewed state/port mappings. Browser
 has one earlier restart of unknown cause; the current router has zero restarts.
-Router replacements preserved the browser ID and restart count. The existing
-Mac SSH route was restored and used for router startup.
+Router replacements preserved the browser ID and restart count. Direct `ssh codexpro-vm108` from Paseo is configured and was used for this
+router-only replacement; Mac is not required.
 
 The three real-Chrome lifecycle cases passed with the shutdown overlay: stop,
 startup error and synthetic challenge exit without submissions while preserving
@@ -152,14 +156,19 @@ the actual shared router heartbeat passed. After the URL-binding, inactive-tab
 startup and modern idle-control corrections, one distinct authorized native
 message received its real answer in Paseo and completed. Its task text contained
 only ordinary user input. Later operator use exposed stale-answer delivery when
-a new submission was not confirmed; reliable consecutive-turn acceptance is
-still open in [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7).
+a new submission was not confirmed; [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7)
+records that incident. The `52a07ce` correction is now installed: two consecutive
+real messages, including multiline input, passed in the same conversation.
+Seventeen packaged synthetic regressions cover unsent-second-turn rejection
+and the remaining submission guards.
 Login persistence across a browser restart remains unverified; see the exact runtime and acceptance evidence in
 [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md).
 `operator-fixture.mjs` uses container-loopback port8049, which stays unpublished.
 
-Do not use real ChatGPT prompts as smoke. Operator login is a separate manual
-step, not synthetic-test evidence.
+Use local fixtures for routine smoke. Real ChatGPT acceptance uses a bounded
+test plan within the current operator work order; the 2026-10-25 work order
+authorized exactly two new messages without repeat approvals. Operator login
+is manual. Challenge stops, pacing limits and refusal to resend remain active.
 
 ## Rollback and preserved data
 
