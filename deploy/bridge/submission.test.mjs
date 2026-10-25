@@ -15,9 +15,15 @@ const {CompletionDetector} = await load('src/bridge/completion.ts');
 const {makeRig, cleanupRig, startBridge, driveUntil} = await load('tests/helpers/harness.ts');
 const profile = await loadPlatformProfile(join(app, 'selectors/chatgpt.yaml'));
 
-function fixture(now = () => 0) {
+function fixture(now = () => 0, lineBreak = 'text') {
   const {document} = parseHTML('<main></main><section data-composer-input><div contenteditable="true"></div></section><button aria-label="Send"></button>');
   const composer = document.querySelector('[contenteditable]');
+  let inputLine;
+  const resetComposer = () => {
+    composer.replaceChildren(); inputLine = composer;
+    if (lineBreak === 'blocks') { inputLine = document.createElement('div'); composer.append(inputLine); }
+  };
+  resetComposer();
   let mode = 'accept', sends = 0, stops = 0, invalidBinding = false, turn = 0;
   const visible = () => {
     for (const element of document.querySelectorAll('*')) {
@@ -43,14 +49,18 @@ function fixture(now = () => 0) {
         isVisible: async () => !!document.querySelector(selector), click: async () => { stops++; }};
     },
     keyboard: {
-      insertText: async text => { composer.textContent += text; },
+      insertText: async text => { inputLine.append(document.createTextNode(text)); },
       press: async key => {
-        if (key === 'Backspace') composer.textContent = '';
-        if (key === 'Shift+Enter') composer.textContent += '\n';
+        if (key === 'Backspace') resetComposer();
+        if (key === 'Shift+Enter') {
+          if (lineBreak === 'br') composer.append(document.createElement('br'));
+          else if (lineBreak === 'blocks') { inputLine = document.createElement('div'); composer.append(inputLine); }
+          else composer.append(document.createTextNode('\n'));
+        }
         if (key !== 'Enter') return;
         sends++;
-        if (mode === 'accept') { add(composer.innerText); composer.textContent = ''; }
-        if (mode === 'other-user') { add('Another submission'); composer.textContent = ''; }
+        if (mode === 'accept') { add(composer.innerText); resetComposer(); }
+        if (mode === 'other-user') { add('Another submission'); resetComposer(); }
       },
     },
   };
@@ -91,6 +101,31 @@ test('chunked input keeps the intended message; an intervening composer edit blo
   await assert.rejects(f.driver.pressSend(), /Composer changed after typing/);
   assert.equal(f.sends(), 1);
 });
+
+for (const lineBreak of ['br', 'blocks']) {
+  test(`multiline ${lineBreak} composer sends once and accepts its new answer`, async () => {
+    const f = fixture(() => 0, lineBreak);
+    const text = 'First line\nSecond line';
+    await f.driver.typeText(text); // appendText issues Shift+Enter, rendered as real DOM breaks.
+    assert.equal(f.composer.textContent, 'First lineSecond line', 'textContent loses the separator');
+    assert.equal(f.composer.innerText, text, 'rendered text preserves the separator');
+    assert.equal(await f.driver.composerText(), text);
+    await f.driver.pressSend();
+    assert.equal(f.sends(), 1);
+    assert.equal((await complete(f.driver)).outcome, 'complete');
+  });
+
+  test(`edited multiline ${lineBreak} composer is refused before Enter`, async () => {
+    const f = fixture(() => 0, lineBreak);
+    await f.driver.typeText('First line\nSecond line');
+    f.composer.lastChild.textContent = 'Edited second line';
+    const edited = f.composer.innerText;
+    assert.equal(edited, 'First line\nEdited second line');
+    await assert.rejects(f.driver.pressSend(), /Composer changed after typing/);
+    assert.equal(f.sends(), 0);
+    assert.equal(f.composer.innerText, edited, 'the edited draft remains available for review');
+  });
+}
 
 for (const clearComposer of [false, true]) {
   test(`failed second Enter refuses prior answer, composer cleared=${clearComposer}`, async () => {

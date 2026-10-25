@@ -4,7 +4,7 @@ index 2a834ed..75a59e3 100755
 +++ b/src/driver/chatgpt.ts
 @@ -159,0 +160,4 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
 +  const composer = document.querySelector(sel.composer);
-+  const composerText = composer && ("value" in composer ? String(composer.value ?? "") : composer.textContent ?? "");
++  const composerText = composer && ("value" in composer ? String(composer.value ?? "") : (composer as HTMLElement).innerText ?? composer.textContent ?? "");
 +  const emptyComposer = !!composer && isVisible(composer) && !composerText?.trim();
 +  const hasAnswer = !!last && [...last.querySelectorAll(sel.answer)].some(el => !!el.textContent?.trim());
 @@ -161,4 +165 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
