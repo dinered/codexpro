@@ -114,8 +114,10 @@ sub file_hash {
 sub api_actor {
     my ($service) = @_;
     my $user = get($service, 'user');
+    die "could not verify authenticated API actor\n" unless ref($user) eq 'HASH';
     my $name = $service eq 'github' ? $user->{login} : $user->{username};
-    die "could not verify authenticated API actor\n" unless defined $name && $name =~ /\A[A-Za-z0-9_.-]+\z/;
+    die "could not verify authenticated API actor\n"
+        unless defined $name && !ref($name) && $name =~ /\A[A-Za-z0-9_.-]+\z/;
     return $name;
 }
 sub actor_for { my ($service, $record) = @_; return $service eq 'github' ? ($record->{user}{login} // '') : ($record->{author}{username} // '') }
@@ -162,6 +164,7 @@ sub comment_record {
 my $mapping = decode_json(do { local $/; open my $fh, '<', "$FindBin::Bin/mappings.json" or die "mapping unavailable\n"; <$fh> });
 my $gh_actor = api_actor('github');
 my $gl_actor = api_actor('gitlab');
+print STDERR 'DISCUSSION_SYNC_ACTORS ' . JSON::PP->new->canonical->encode({ github => $gh_actor, gitlab => $gl_actor }) . "\n";
 my @rows;
 my @directions;
 sub add_direction {

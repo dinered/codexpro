@@ -31,7 +31,7 @@ sub run_sync {
       DISCUSSION_SYNC_LOCK_FILE=>$opts{lock_file}//"$dir/run.lock", DISCUSSION_SYNC_ENABLED=>$opts{enabled}//'',
       DISCUSSION_SYNC_EXPECTED_PLAN_SHA256=>$opts{expected}//'',
       DISCUSSION_SYNC_RECURRING=>'false');
-    for my $key (qw(FAKE_FAIL_POST_AFTER FAKE_EDIT_SOURCE_ID FAKE_TARGET_EDIT_ON_RECHECK FAKE_ERROR_MODE FAKE_SLEEP_USER)) {
+    for my $key (qw(FAKE_FAIL_POST_AFTER FAKE_EDIT_SOURCE_ID FAKE_TARGET_EDIT_ON_RECHECK FAKE_ERROR_MODE FAKE_SLEEP_USER FAKE_ACTOR_MODE)) {
         if (exists $opts{$key}) { $ENV{$key}=$opts{$key} } else { delete $ENV{$key} }
     }
     my $out="$dir/out.txt"; my $err="$dir/err.txt";
@@ -53,6 +53,13 @@ my $dry=decode_json($dry_out);
 is($dry->{summary}{create_attributed_mirror},19,'dry-run keeps exactly the approved 19 source comments eligible');
 is($dry->{readOnly},1,'default mode is read-only');
 is(post_count(),0,'dry-run performs no API writes');
+my @actor_lines = $dry_err =~ /^(DISCUSSION_SYNC_ACTORS .*)$/mg;
+is(scalar @actor_lines,1,'successful identity lookups emit one actor evidence line');
+my ($actor_json) = $actor_lines[0] =~ /^DISCUSSION_SYNC_ACTORS (\{.*\})$/;
+my $actor_pair = decode_json($actor_json);
+is_deeply($actor_pair,{github=>'sync-gh',gitlab=>'sync-gl'},'actor evidence contains only the authenticated username pair');
+is_deeply([sort keys %$actor_pair],[qw(github gitlab)],'actor evidence has no unrelated response fields');
+unlike($dry_err,qr/fixture-secret|token|headers|credential/i,'actor evidence discloses no credential or unrelated API fields');
 my $logs=request_rows();
 is(scalar(grep { $_->{host} ne ($_->{service} eq 'github'?'github.com':'gitlab.home.arpa') } @$logs),0,'every fake request uses the explicit expected host');
 
@@ -116,6 +123,21 @@ isnt($unauth_status,0,'HTTP 401 is surfaced as a failure');
 like($unauth_text,qr/HTTP 401.*verify the existing credential/,'401 gives sanitized access guidance');
 like($unauth_text,qr/github GET user \(HTTP 401\)/,'401 identifies only the failing service and operation');
 unlike($unauth_text.$unauth_out,qr/fixture-secret/,'401 errors never echo response secrets');
+for my $case (
+    ['github-missing','github identity missing username fails closed'],
+    ['github-malformed','github identity malformed username fails closed'],
+    ['gitlab-missing','GitLab identity missing username fails closed'],
+    ['gitlab-malformed','GitLab identity malformed username fails closed'],
+    ['github-nonobject','non-object GitHub identity response fails closed'],
+    ['gitlab-nonobject','non-object GitLab identity response fails closed'],
+) {
+    reset_state();
+    my ($status,$out,$err)=run_sync(FAKE_ACTOR_MODE=>$case->[0]);
+    isnt($status,0,$case->[1]);
+    unlike($err,qr/^DISCUSSION_SYNC_ACTORS /m,'invalid actor pair emits no evidence line');
+    is(post_count(),0,'invalid actor identity performs no metadata writes');
+    unlike($err.$out,qr/fixture-secret|credential-path|private-header/i,'invalid identity diagnostics expose no fixture credential data');
+}
 my ($missing_cli_status,$missing_cli_out,$missing_cli_text)=run_sync(gh_cli=>"$dir/not-installed-gh");
 isnt($missing_cli_status,0,'missing runner CLI is detected');
 like($missing_cli_text,qr/API CLI unavailable for github GET user; install the required CLI on the protected runner/,'missing binary error names the CLI/service operation');
@@ -153,7 +175,20 @@ if (($ENV{FAKE_ERROR_MODE}//'') =~ /\A(401|403)\z/ && $endpoint eq 'user') { pri
 if (($ENV{FAKE_SLEEP_USER}//'') ne '' && $endpoint eq 'user') { select undef,undef,undef,$ENV{FAKE_SLEEP_USER} }
 if ($host ne ($service eq 'github'?'github.com':'gitlab.home.arpa')) { print STDERR 'invalid host'; exit 1 }
 if ($method ne 'GET' && $content_type ne 'Content-Type: application/json') { print STDERR 'HTTP 415 missing content type'; exit 1 }
-if ($endpoint eq 'user') { print JSON::PP->new->utf8->encode($service eq 'github'?{login=>'sync-gh'}:{username=>'sync-gl'}); exit 0 }
+if ($endpoint eq 'user') {
+  my $mode=$ENV{FAKE_ACTOR_MODE}//'';
+  my $response;
+  if ($service eq 'github') {
+    $response = $mode eq 'github-nonobject' ? ['sync-gh'] : {login=>'sync-gh',token=>'fixture-secret',headers=>{'Authorization'=>'private-header'},credential_path=>'/fixture/credential-path'};
+    delete $response->{login} if ref($response) eq 'HASH' && $mode eq 'github-missing';
+    $response->{login}={name=>'sync-gh'} if ref($response) eq 'HASH' && $mode eq 'github-malformed';
+  } else {
+    $response = $mode eq 'gitlab-nonobject' ? ['sync-gl'] : {username=>'sync-gl',token=>'fixture-secret',headers=>{'Authorization'=>'private-header'},credential_path=>'/fixture/credential-path'};
+    delete $response->{username} if ref($response) eq 'HASH' && $mode eq 'gitlab-missing';
+    $response->{username}={name=>'sync-gl'} if ref($response) eq 'HASH' && $mode eq 'gitlab-malformed';
+  }
+  print JSON::PP->new->utf8->encode($response); exit 0
+}
 my $payload;
 if ($input) { open my $pf,'<:raw',$input or die 'input'; local $/; $payload=decode_json(<$pf>); close $pf }
 if ($method eq 'POST') {
