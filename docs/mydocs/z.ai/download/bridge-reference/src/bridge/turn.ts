@@ -8,7 +8,8 @@ import type { Clock } from "../core/clock.ts";
 import type { Logger } from "../core/log.ts";
 import { EVENT } from "../core/log.ts";
 import type { Random } from "../core/random.ts";
-import { BridgeFatalError, errorMessage, isCrash, isSpoolError, TurnError } from "../core/errors.ts";
+import { stat } from "node:fs/promises";
+import { BridgeFatalError, errorMessage, isCrash, isErrno, isSpoolError, TurnError } from "../core/errors.ts";
 import { FATAL_REASON, TURN_ERROR, type AnswerSnapshot, type Phase, type TurnOutcome, type TurnTask } from "../core/types.ts";
 import type { BridgeConfig } from "../config.ts";
 import type { Pacer } from "../pace/pace.ts";
@@ -205,7 +206,11 @@ class TurnEngine {
     }
     const written = await writeResult(this.dir, { status: "ok", markdown: answer, traceId: task.traceId });
     if (!written) throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, "результат уже создан другим исполнителем", false);
-    await this.toPhase("result");
+    // Результат опубликован: клиент получил status=ok и вправе ack+dispose в любой момент,
+    // в том числе между любыми двумя fs-операциями ниже. Финализирующие фазы
+    // переносят штатное исчезновение каталога как завершение хода (доработка
+    // ревью PR #9 P1); перехват эпохи при живом каталоге остаётся фатальным.
+    await this.toPhaseFinal("result");
     this.deps.pacer.recordSuccess();
     await this.deps.metrics.record({ kind: "ok", ms: this.deps.clock.now() - startedAt }, task.id).catch(() => {});
     this.log.event(EVENT.TURN_OK, `ответ отдан (${answer.length} символов markdown)`);
@@ -213,8 +218,11 @@ class TurnEngine {
 
     // ── подтверждён: плагин атомарно переименовал result.json (birdview §2) ──
     if (await this.waitAck()) {
-      await this.toPhase("confirmed");
       this.log.event(EVENT.TURN_ACK, "плагин подтвердил результат");
+      // фаза confirmed — через финализирующую запись: плагин вправе удалить
+      // каталог сразу после ack (birdview §2), и исчезновение каталога между
+      // проверкой и записью фазы — завершение хода, а не утрата владения
+      await this.toPhaseFinal("confirmed");
     } else if (!this.deps.stop.stopped) {
       this.log.event(EVENT.TURN_ACK_TIMEOUT, `нет result.ack за ${this.cfg.ackWaitMs / 1000} с — каталог хода оставлен плагину`);
     }
@@ -237,6 +245,46 @@ class TurnEngine {
       throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `владение утрачено при записи фазы ${phase}`, false);
     }
     this.log.event(EVENT.TURN_PHASE, `фаза: ${phase}`, { phase });
+  }
+
+  /**
+   * Финализирующая фаза — пишется ПОСЛЕ публикации result.json (доработка ревью
+   * PR #9 P1). Клиент получил статус и вправе ack+dispose в любой момент, поэтому
+   * штатное исчезновение каталога (ENOENT) в этой зоне — завершение хода: фазу
+   * уже некуда писать, ответ доставлен. true — фаза записана; false — каталог
+   * удалён плагином после ack, ход завершён без записи фазы.
+   *
+   * Один stat ничего не гарантирует: клиент успевает удалить каталог между
+   * любыми двумя операциями, поэтому исчезновение проверяется заново на каждом
+   * шаге (перед записью, в ошибке записи, при повторной проверке владения), а не
+   * единожды заранее. Реальные ошибки EACCES/EIO остаются наружу — spool
+   * недоступен (birdview §3); перехват эпохи при живом каталоге остаётся
+   * фатальным OWNERSHIP_LOST; удалённый spool не пересоздаётся.
+   */
+  private async toPhaseFinal(phase: Phase): Promise<boolean> {
+    if (!(await pathExists(this.dir))) return false; // каталог удалён до фазы
+    if (!(await stillOwned(this.dir, this.epoch))) {
+      // наш claim исчез, пока мы проверяли: каталог могли удалить (штатно) или
+      // перехватить (фатально) — различает только повторная проверка каталога
+      if (!(await pathExists(this.dir))) return false;
+      throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `эпоха ${this.epoch} больше не максимальная при фазе ${phase}`, false);
+    }
+    this.deps.crash?.("before-state-write");
+    try {
+      await writeState(this.dir, this.epoch, phase);
+    } catch (error) {
+      // каталог исчез ровно между проверкой и open tmp — это ENOENT с каталогом,
+      // которого больше нет; повторная проверка отделяет штатное удаление от spool
+      if (isErrno(error, "ENOENT") && !(await pathExists(this.dir))) return false;
+      throw error;
+    }
+    this.deps.crash?.("after-state-write");
+    if (!(await stillOwned(this.dir, this.epoch))) {
+      if (!(await pathExists(this.dir))) return false; // удалён между записью и проверкой
+      throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `владение утрачено при записи фазы ${phase}`, false);
+    }
+    this.log.event(EVENT.TURN_PHASE, `фаза: ${phase}`, { phase });
+    return true;
   }
 
   /**
@@ -344,11 +392,17 @@ class TurnEngine {
     }
   }
 
-  /** Ожидание result.ack (фаза «подтверждён»); мягкая остановка прекращает ожидание. */
+  /**
+   * Ожидание result.ack (фаза «подтверждён»); мягкая остановка прекращает ожидание.
+   * Исчезновение каталога хода тоже означает подтверждение: удалять его плагин
+   * вправе только после ack (birdview §2) — иначе мост висел бы здесь до конца
+   * ackWaitMs, блокируя очередь уже ЗАКРЫТОГО хода.
+   */
   private async waitAck(): Promise<boolean> {
     const deadline = this.deps.clock.now() + this.cfg.ackWaitMs;
     for (;;) {
       if (await hasAck(this.dir)) return true;
+      if (!(await pathExists(this.dir))) return true; // удалён после ack — подтверждено
       if (this.deps.stop.stopped) return false;
       if (this.deps.clock.now() >= deadline) return false;
       await this.deps.clock.sleep(Math.min(this.cfg.cancelPollMs, deadline - this.deps.clock.now()));
@@ -445,4 +499,15 @@ function fieldsLogger(log: Logger, fields: { trace: string; turn: string }): Log
     event: (code, message, extra) => log.event(code, message, { ...fields, ...extra }),
     raw: (message) => log.raw(message),
   };
+}
+
+/** Существует ли путь: строго по ENOENT, недоступность spool — наружу (birdview §3). */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return false;
+    throw error;
+  }
 }

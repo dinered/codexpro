@@ -63,7 +63,7 @@ npm run plugin -- stop <id>         # «Стоп» (Ф-1)
 | `BRIDGE_COMPOSER_WAIT_MS` | `10000` | «нет поля ввода» (фатально) |
 | `BRIDGE_CHAT_BUSY_WAIT_MS` | `120000` | «чужой ход/черновик в поле» (Н-4) |
 | `BRIDGE_STOP_WAIT_MS` | `30000` | ожидание холостого после «Стоп» (Ф-1) |
-| `BRIDGE_ACK_WAIT_MS` | `120000` | ожидание result.ack от плагина |
+| `BRIDGE_ACK_WAIT_MS` | `120000` | ожидание result.ack от плагина (ack или удаление каталога; очередь не блокируется дольше) |
 | `BRIDGE_CANCEL_POLL_MS` | `500` | период проверок cancel/alive/владения (birdview §2) |
 | `BRIDGE_POLL_MS` | `1500` | база опроса ответа (фактические интервалы рандомизируются, П-5) |
 | `BRIDGE_TYPE_RETRIES` | `2` | повторы ввода при несовпадении (Ф-4) |
