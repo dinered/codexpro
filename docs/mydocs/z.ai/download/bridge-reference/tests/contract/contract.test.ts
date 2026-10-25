@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { ManualClock } from "../../src/core/clock.ts";
@@ -19,11 +21,12 @@ import { Bridge } from "../../src/bridge/loop.ts";
 import type { CrashPoint } from "../../src/bridge/turn.ts";
 import { PluginClient } from "../../plugin-client/client.ts";
 import { testConfig } from "../helpers/harness.ts";
-import { readResult } from "../../src/protocol/result.ts";
+import { readResult, ackResult } from "../../src/protocol/result.ts";
 import { journalSize, journalSend } from "../../src/protocol/journal.ts";
 import { readLatestState, writeState } from "../../src/protocol/state.ts";
 import { createClaim } from "../../src/protocol/claim.ts";
 import type { BridgeConfig } from "../../src/config.ts";
+import type { NetworkProbe } from "../../src/driver/cdp-stream.ts";
 
 interface Ctx {
   root: string;
@@ -57,6 +60,7 @@ function bridgeFor(
   ctx: Ctx,
   crash?: (point: CrashPoint) => void,
   overrides: Partial<Omit<BridgeConfig, "pace">> & { pace?: Partial<PaceConfig> } = {},
+  probe: NetworkProbe | null = null,
 ): Run {
   const config = testConfig(ctx.root, overrides);
   const bridge = new Bridge({
@@ -67,7 +71,7 @@ function bridgeFor(
     rand: new SeededRandom(ctx.seed + 2),
     log: createLogger((line) => ctx.lines.push(line), () => ctx.clock.now()),
     metrics: new Metrics(null, "metrics.json", ctx.clock, createLogger(() => {}, () => ctx.clock.now())),
-    probe: null,
+    probe,
     stop: ctx.stop,
     crash,
   });
@@ -438,6 +442,208 @@ test("контракт 16: сигнал оператора до отправки
     assert.equal(ctx.driver.sendCount, 0);
     assert.equal(ctx.driver.composer, "", "введённое стёрто");
     await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 17: клиент ack+dispose сразу — очередь не ждёт ackWait закрытого хода", async (t) => {
+  // Отдельные последовательные subtests: stat перехватывается глобально, а каждый
+  // interleaving должен выполняться и при неудаче предыдущего сценария.
+  for (const scenario of ["до-опроса", "stat-confirmed", "result-фаза"] as const) {
+    await t.test(scenario, () => assertAckDisposeRace(scenario));
+  }
+});
+
+/** Штатный ack+dispose в выбранном окне между fs-операциями финализации. */
+async function assertAckDisposeRace(scenario: "до-опроса" | "stat-confirmed" | "result-фаза"): Promise<void> {
+  const ctx = await makeCtx({ generationMs: 100 });
+  const ackWaitMs = 20_000;
+  // Проверяем освобождение очереди по фактической отправке следующего хода.
+  // Полное завершение ответа имеет собственное окно стабильности и бюджет:
+  // его длительность не доказывает, ждал ли мост ack первого хода.
+  const continuationBudgetMs = 8_000;
+  const completionBudgetMs = 60_000;
+  const nativeStat = fsp.stat;
+  let run: Run | undefined;
+  const failures: unknown[] = [];
+  try {
+    const first = await ctx.client.put("первый ход", ALIVE);
+    const dir = join(ctx.root, first.id);
+    const claimPath = join(dir, "claim.1");
+    let disposed = false;
+    let intercepts = 0;
+    const firstAcked = (): boolean => ctx.lines.some((line) => line.includes("TURN_ACK ") && line.includes(first.id));
+    const exists = async (path: string): Promise<boolean> => {
+      try {
+        await nativeStat(path);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
+      }
+    };
+    const disposeNow = async (): Promise<void> => {
+      // Тот же порядок, что у клиента: подтверждение → удаление, без force.
+      assert.equal(await ackResult(dir), true, "результат подтверждён ровно этим клиентом");
+      await ctx.client.dispose(first.id);
+      disposed = true;
+    };
+    fsp.stat = (async (path: unknown, ...rest: unknown[]): Promise<unknown> => {
+      const matches =
+        !disposed && intercepts === 0 && typeof path === "string" &&
+        ((scenario === "до-опроса" && path === join(dir, "result.ack") && (await exists(join(dir, "result.json")))) ||
+          (scenario === "stat-confirmed" && path === dir && firstAcked()) ||
+          (scenario === "result-фаза" && path === claimPath && (await exists(join(dir, "result.json")))));
+      if (!matches) return Reflect.apply(nativeStat, fsp, [path, ...rest]);
+      intercepts += 1;
+      if (scenario === "до-опроса") {
+        // После result-фазы, но до первого ack-опроса: мост увидит ENOENT.
+        await disposeNow();
+        return Reflect.apply(nativeStat, fsp, [path, ...rest]);
+      }
+      const info = await Reflect.apply(nativeStat, fsp, [path, ...rest]);
+      if (scenario === "stat-confirmed") {
+        // ack ранее выполнен waitResult; TURN_ACK уже записан мостом.
+        await ctx.client.dispose(first.id);
+        disposed = true;
+      } else {
+        await disposeNow();
+      }
+      return info;
+    }) as typeof fsp.stat;
+    syncBuiltinESMExports();
+    run = bridgeFor(ctx, undefined, { ackWaitMs });
+
+    // result-фаза может удалить result до того, как тест успеет его опросить.
+    // Такое расписание завершает ожидание по disposed, а не ждёт 120 с пустоту.
+    assert.ok(await pump(ctx, async () => disposed || (await readResult(dir)) !== null), "первый результат не опубликован");
+    if (scenario === "stat-confirmed") {
+      const got = await ctx.client.waitResult(first.id, 5_000);
+      assert.equal(got?.status, "ok");
+    }
+    assert.ok(await pump(ctx, () => disposed, 5_000), `сценарий ${scenario}: перехват не сработал`);
+    assert.equal(intercepts, 1, `сценарий ${scenario}: ровно один заданный interleaving`);
+
+    const second = await ctx.client.put("второй ход сразу", ALIVE);
+    await pump(ctx, () => ctx.driver.sendCount === 2 || run!.settled, continuationBudgetMs);
+    assert.equal(ctx.driver.sendCount, 2,
+      `FAST_CONTINUATION ${scenario}: очередь не отправила второй ход за ${continuationBudgetMs} мс < ackWait=${ackWaitMs}; disposed=${disposed}, intercepts=${intercepts}, settled=${run.settled}\n${ctx.lines.join("\n")}`);
+    assert.ok(await pump(ctx, async () => (await readResult(join(ctx.root, second.id))) !== null, completionBudgetMs),
+      `сценарий ${scenario}: второй ответ не завершён\n${ctx.lines.join("\n")}`);
+    assert.equal((await ctx.client.waitResult(second.id, 5_000))?.status, "ok");
+    assert.ok(firstAcked(), `сценарий ${scenario}: нет точного TURN_ACK первого id`);
+    assert.ok(!ctx.lines.some((line) => line.includes("TURN_ACK_TIMEOUT")), `сценарий ${scenario}: недопустимый TURN_ACK_TIMEOUT`);
+    assert.ok(!ctx.lines.some((line) => line.includes("BRIDGE_FATAL")), `сценарий ${scenario}: недопустимый BRIDGE_FATAL`);
+  } catch (error) {
+    failures.push(error);
+  } finally {
+    fsp.stat = nativeStat;
+    syncBuiltinESMExports();
+    // Ошибки остановки/удаления остаются видимы, но не заменяют первую ошибку
+    // assertions. В AggregateError первичная причина всегда первая.
+    if (run) {
+      try { await stopBridge(ctx, run); } catch (error) { failures.push(error); }
+    }
+    try { await cleanup(ctx); } catch (error) { failures.push(error); }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, `сценарий ${scenario}: ошибка проверки и очистки`);
+}
+
+test("контракт 18: порционный ввод chunks — без двойного учёта времени, сверка Ф-4 (У-3)", async () => {
+  const ctx = await makeCtx({ generationMs: 100 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп. Третье предложение про протокол.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 10: instant-база была бы ~9 с (время набора); chunks — около minInterval
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 10 } });
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "ok");
+    // Ф-4: конкатенция порций равна задаче — ход дошёл до отправки без TEXT_MISMATCH
+    assert.match(result?.markdown ?? "", /Первое предложение про мост/);
+    const pauseLine = ctx.lines.find((line) => line.includes("PACE_PAUSE") && line.includes("перед набором"));
+    assert.ok(pauseLine, "пауза темпа записана");
+    const pauseSec = Number(/пауза темпа (\d+) с/.exec(pauseLine!)?.[1] ?? 0);
+    assert.ok(pauseSec < 5, `в базе паузы нет времени набора: ${pauseSec} с (instant был бы ~9 с)`);
+    assert.ok(ctx.lines.some((line) => line.includes("порция ввода")), "набор шёл порциями");
+    assert.equal(ctx.driver.sendCount, 1);
+    await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 19: 429 от API — фатально как капча (У-2); без пробы (флаг off) поведение прежнее", async () => {
+  const ctx = await makeCtx({ generationMs: 30_000 });
+  try {
+    const task = await ctx.client.put("невидимая защита", ALIVE);
+    let resist = false;
+    // заглушка NetworkProbe: сопротивление появляется ПОСЛЕ отправки (в generating)
+    const probe = {
+      idleMs: () => 0,
+      resistance: () => (resist ? { status: 429, count: 2 } : null),
+    } as unknown as NetworkProbe;
+    const run = bridgeFor(ctx, undefined, {}, probe);
+    await pump(ctx, () => ctx.driver.sendCount === 1);
+    resist = true; // платформа начала отвечать 429 на backend-api
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "error");
+    assert.equal(result?.code, "CHALLENGE");
+    assert.match(result?.message ?? "", /429/);
+    assert.ok(ctx.lines.some((line) => line.includes("CHALLENGE") && line.includes("У-2")));
+    const finish = (await stopBridge(ctx, run)) as { fatal?: string | null };
+    assert.equal(finish?.fatal, "CHALLENGE");
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 20: отмена между порциями chunks — поле стёрто, чужого черновика нет (R2)", async () => {
+  const ctx = await makeCtx({ generationMs: 100 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 1: общий бюджет набора упирается в потолок maxTypingMs (5 с),
+    // по ~2.5 с на порцию — отмена приходит в паузе ВТОРОЙ порции, когда первая
+    // уже записана в поле. R2 ревью PR #10: свой ввод учитывается с первой порции,
+    // уборка при отмене между порциями обязательна (остаток = чужой черновик, Н-4)
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 1, jitter: 0 } });
+    await pump(ctx, async () => ctx.driver.composer.includes("Первое"));
+    assert.equal(ctx.driver.sendCount, 0, "перед отменой отправки не было");
+    await ctx.client.cancel(task.id);
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "cancelled");
+    assert.equal(result?.code, "CANCEL");
+    assert.equal(ctx.driver.composer, "", "набранная порция стёрта: поле не остаётся чужим черновиком");
+    assert.equal(ctx.driver.sendCount, 0);
+    await stopBridge(ctx, run);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+test("контракт 21: капча во время порционного набора — остановка до отправки (R4, П-6)", async () => {
+  const ctx = await makeCtx({ challengeAt: 3_000 });
+  try {
+    const text = "Первое предложение про мост. Второе предложение про темп.";
+    const task = await ctx.client.put(text, ALIVE);
+    // charsPerSec = 1: общий бюджет набора = потолку maxTypingMs (5 с), по ~2.5 с
+    // на порцию — капча (challengeAt 3 с) появляется посреди паузы ПЕРВОЙ порции.
+    // R4 ревью PR #10: периодический challenge-чек в паузах набора (challenge: true)
+    // ловит её ДО отправки; прежний код проверял капчу только после отправки
+    // (sendCount=1, CHALLENGE останавливал мост с уже отправленным сообщением)
+    const run = bridgeFor(ctx, undefined, { inputMode: "chunks", pace: { charsPerSec: 1, jitter: 0 } });
+    await pump(ctx, async () => (await readResult(join(ctx.root, task.id))) !== null);
+    const result = await readResult(join(ctx.root, task.id));
+    assert.equal(result?.status, "error");
+    assert.equal(result?.code, "CHALLENGE");
+    assert.equal(ctx.driver.sendCount, 0, "отправки не было: капча поймана в паузе набора, до точки невозврата");
+    const finish = (await stopBridge(ctx, run)) as { fatal?: string | null };
+    assert.equal(finish?.fatal, "CHALLENGE");
   } finally {
     await cleanup(ctx);
   }

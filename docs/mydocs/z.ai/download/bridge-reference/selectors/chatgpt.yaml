@@ -9,6 +9,9 @@ start_url: "https://chatgpt.com/"
 # Сетевой стрим как дополнительный сигнал конца ответа (birdview §3, «усиление»).
 # Включать только когда эндпоинты платформы проверены и стабильны.
 network_probe: false
+# У-1: редирект на эти пути (через запятую) при том же домене = ограничение
+# аккаунта/выход — мост останавливается (П-6, kind restriction).
+login_paths: "/auth/login"
 selectors:
   # обязательные — без них самопроверка на старте не пускает мост
   composer: '[data-composer-input] [contenteditable="true"]'
@@ -20,4 +23,7 @@ selectors:
   send_button: 'button[data-testid="send-button"], button[aria-label="Отправить"], button[aria-label="Send prompt"]'
   regenerate: 'button[aria-label="Сгенерировать ответ заново"], button[aria-label="Regenerate"], button[data-testid="regenerate"]'
   user_bubble: "[data-user-message-bubble]"
-  challenge: '[data-testid="challenge"]'
+  # У-1: капча — тоже списком кандидатов (CSS «или»), как у кнопок (Д-5):
+  # Turnstile (iframe/атрибут sitekey), hCaptcha (виджет/iframe), интерстишл Cloudflare,
+  # собственный маркер платформы. Найденным считается первый ВИДИМый кандидат.
+  challenge: '[data-testid="challenge"], iframe[src*="challenges.cloudflare.com"], [data-turnstile-sitekey], [data-hcaptcha-widget-id], iframe[title*="hCaptcha"]'

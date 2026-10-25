@@ -4,6 +4,8 @@
 import { paceFromEnv, type PaceConfig } from "./pace/pace.ts";
 
 export type DriverKind = "chatgpt" | "human";
+/** У-3: режим ввода — мгновенный (вставка) или порционный (предложения с интервалами). */
+export type InputMode = "instant" | "chunks";
 
 export interface BridgeConfig {
   /** каталог spool (позиционный аргумент запуска) */
@@ -35,6 +37,8 @@ export interface BridgeConfig {
   pollBaseMs: number;
   /** повторы ввода при несовпадении (Ф-4): первичный ввод + N повторов */
   typeRetries: number;
+  /** режим ввода (У-3): instant — вставка целиком; chunks — порции с интервалами */
+  inputMode: InputMode;
   /** каталог файла метрик; "off" — выключить */
   metricsDir: string | null;
   pace: PaceConfig;
@@ -55,6 +59,7 @@ export const BRIDGE_DEFAULTS = {
   cancelPollMs: 500,
   pollBaseMs: 1_500,
   typeRetries: 2,
+  inputMode: "instant",
 } as const;
 
 function num(name: string, fallback: number, env: Record<string, string | undefined>): number {
@@ -71,6 +76,8 @@ export function bridgeConfigFromEnv(
 ): BridgeConfig {
   const driver = (env.BRIDGE_DRIVER ?? BRIDGE_DEFAULTS.driver) as DriverKind;
   if (driver !== "chatgpt" && driver !== "human") throw new Error(`BRIDGE_DRIVER=${driver} — ожидалось chatgpt или human`);
+  const inputMode = (env.BRIDGE_INPUT_MODE ?? BRIDGE_DEFAULTS.inputMode) as InputMode;
+  if (inputMode !== "instant" && inputMode !== "chunks") throw new Error(`BRIDGE_INPUT_MODE=${inputMode} — ожидалось instant или chunks`);
   const metricsDir = env.BRIDGE_METRICS === "off" ? null : (env.BRIDGE_METRICS ?? null);
   return {
     root,
@@ -88,6 +95,7 @@ export function bridgeConfigFromEnv(
     cancelPollMs: num("BRIDGE_CANCEL_POLL_MS", BRIDGE_DEFAULTS.cancelPollMs, env),
     pollBaseMs: num("BRIDGE_POLL_MS", BRIDGE_DEFAULTS.pollBaseMs, env),
     typeRetries: num("BRIDGE_TYPE_RETRIES", BRIDGE_DEFAULTS.typeRetries, env),
+    inputMode,
     metricsDir,
     pace: paceFromEnv(env),
   };

@@ -13,7 +13,8 @@ test('page evaluator survives browser serialization and reads final answer', asy
   const turn = {querySelectorAll: () => [answer]};
   const button = {hidden: false, disabled: false, getAttribute: () => null,
     getClientRects: () => [{}]};
-  const document = {querySelectorAll: (s) => s === '.turn' ? [turn] : s === '.send' ? [button] : [],
+  const document = {querySelector: () => null,
+    querySelectorAll: (s) => s === '.turn' ? [turn] : s === '.send' ? [button] : [],
     defaultView: {getComputedStyle: () => ({display: 'block', visibility: 'visible'})}};
   const page = {evaluate: async (fn, input) => vm.runInNewContext(
     `(${fn.toString()})(input)`, {input, document})};
@@ -26,7 +27,8 @@ test('page evaluator survives browser serialization and reads final answer', asy
 test('serialized evaluator recognizes visible generation and disabled send', async () => {
   const stop = {hidden: false, getAttribute: () => null, getClientRects: () => [{}]};
   const send = {...stop, disabled: true};
-  const document = {querySelectorAll: (s) => s === '.stop' ? [stop] : s === '.send' ? [send] : [],
+  const document = {querySelector: () => null,
+    querySelectorAll: (s) => s === '.stop' ? [stop] : s === '.send' ? [send] : [],
     defaultView: {getComputedStyle: () => ({display: 'block', visibility: 'visible'})}};
   const page = {evaluate: async (fn, input) => vm.runInNewContext(
     `(${fn.toString()})(input)`, {input, document})};

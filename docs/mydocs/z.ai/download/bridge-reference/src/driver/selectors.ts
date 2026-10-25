@@ -11,6 +11,8 @@ export interface PlatformProfile {
   start_url: string;
   /** сетевой стрим как дополнительный сигнал конца ответа (birdview §3, «усиление») */
   network_probe: boolean;
+  /** У-1: пути логина через запятую — редирект на них = ограничение (П-6, kind restriction) */
+  login_paths?: string;
   selectors: {
     composer: string;
     turn: string;
@@ -43,6 +45,9 @@ export async function loadPlatformProfile(path: string): Promise<PlatformProfile
   else for (const key of REQUIRED_SELECTORS) {
     const value = parsed.selectors[key];
     if (typeof value !== "string" || !value) problems.push(`нет selectors.${key}`);
+  }
+  if (parsed.login_paths !== undefined && typeof parsed.login_paths !== "string") {
+    problems.push("login_paths — строка путей через запятую");
   }
   if (problems.length) throw new Error(`профиль платформы неполон (${path}): ${problems.join(", ")}`);
   return parsed;

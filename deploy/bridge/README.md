@@ -106,17 +106,17 @@ new messages; do not change its restart policy to work around this.
 
 The deployment serialization test fails on the untouched source with
 `visibleIn is not defined`, and passes with the overlay. Reference TypeScript
-checks pass. The final isolated validation copy passes all 64 source tests,
-including the 120-case H1 crash/recovery model, plus both serialization tests.
-The source snapshot remains unchanged. h1-fixture.patch affects validation
-only: it gives real filesystem I/O event-loop time while advancing the manual
-clock in H1 and the lease test, and settles H1 workers before temporary-spool
-cleanup. It is never applied to the runtime image. Earlier fixture failures
+checks include the reference suite with the 120-case H1 crash/recovery model,
+the patched source and deployment types, and the serialization fixtures.
+The reference test harness gives real filesystem I/O event-loop time while
+advancing the manual clock in H1 and the lease test, and settles H1 workers
+before temporary-spool cleanup. These fixture corrections are checked into the
+reference tests; no separate h1-fixture overlay is required. Earlier fixture failures
 remain recorded in the task evidence. Browser and bridge acceptance still
 require the live checks below; a passing source suite does not establish them.
 
 ```sh
-# Creates and retains an isolated copy with runtime and test-fixture overlays.
+# Creates and retains an isolated copy with the deployment overlays.
 sh deploy/bridge/check.sh
 ```
 

@@ -45,6 +45,12 @@ export class ChatGptDriver implements ChatDriver {
   }
 
   async typeText(text: string): Promise<void> {
+    await this.appendText(text);
+  }
+
+  /** Дописать порцию в поле (У-3): курсор в конце предыдущей, строки через Shift+Enter.
+   *  Голый Enter отправил бы сообщение раньше времени (Ф-4) — только Shift+Enter. */
+  async appendText(text: string): Promise<void> {
     // строки через Shift+Enter: голый Enter отправил бы сообщение раньше времени (Ф-4)
     await this.page.locator(this.profile.selectors.composer).focus();
     const lines = text.split(/\r?\n/);
@@ -84,15 +90,37 @@ export class ChatGptDriver implements ChatDriver {
   async stopGeneration(): Promise<void> {
     const stop = this.page.locator(this.profile.selectors.stop_button).first();
     if (await stop.isVisible().catch(() => false)) {
-      await stop.click({ force: true, timeout: 2_000 }).catch(() => {});
+      // У-4: обычный клик с ожиданием actionability (без force — тот попадает
+      // в невидимый элемент и выглядит нечеловеческим жестом). Сбой клика
+      // не фатален: генерация остановится по другим признакам (Ф-1, Н-2).
+      await stop.click({ timeout: 2_000 }).catch(() => {});
     }
   }
 
   async challenge(): Promise<Challenge | null> {
     if (!(await this.onDomain())) return null;
+    // У-1: капча — списком кандидатов (Turnstile/hCaptcha/интерстишл + data-testid),
+    // как у кнопок (Д-5). R7 ревью PR #10: первый ВИДИМый кандидат ищется по ВСЕМУ
+    // набору — фильтр видимости на стороне Playwright вместо отсечения первых 20
+    // совпадений по позиции (20 скрытых + видимый 21-й обязан находиться).
+    // Длительность проверки ограничена самим запросом: isVisible не ждёт.
     const sel = this.profile.selectors.challenge;
-    if (sel && (await this.page.locator(sel).first().isVisible().catch(() => false))) {
-      return { kind: "captcha", detail: "платформа показывает проверку (капча/подтверждение)" };
+    if (sel) {
+      const visible = this.page.locator(sel).filter({ visible: true });
+      if (await visible.first().isVisible().catch(() => false)) {
+        return { kind: "captcha", detail: "платформа показывает проверку (капча/подтверждение)" };
+      }
+    }
+    // У-1: редирект на вход — домен тот же, путь ведёт на логин → ограничение (П-6)
+    const loginPaths = (this.profile.login_paths ?? "")
+      .split(",")
+      .map((path) => path.trim())
+      .filter((path) => path.length > 0);
+    if (loginPaths.length) {
+      const path = new URL(this.page.url()).pathname;
+      if (loginPaths.some((prefix) => path.startsWith(prefix))) {
+        return { kind: "restriction", detail: `платформа отправила на страницу входа (${path}) — ограничение/выход (П-6)` };
+      }
     }
     return null;
   }

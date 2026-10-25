@@ -33,6 +33,9 @@ export interface ChatDriver {
   /** Многострочный ввод без отправки (Ф-4). */
   typeText(text: string): Promise<void>;
 
+  /** Дописать порцию в поле без очистки (У-3, порционный ввод). */
+  appendText(text: string): Promise<void>;
+
   /** Текущее содержимое поля — для сверки с задачей (Ф-4). */
   composerText(): Promise<string>;
 

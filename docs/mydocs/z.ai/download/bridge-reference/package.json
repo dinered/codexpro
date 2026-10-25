@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-bridge",
-  "version": "3.1.0",
+  "version": "3.2.1",
   "private": true,
   "type": "module",
   "description": "Мост Paseo → web ChatGPT: протокол v3, темп человека, эпохи владения, идемпотентность",

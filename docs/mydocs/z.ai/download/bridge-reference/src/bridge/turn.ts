@@ -8,10 +8,11 @@ import type { Clock } from "../core/clock.ts";
 import type { Logger } from "../core/log.ts";
 import { EVENT } from "../core/log.ts";
 import type { Random } from "../core/random.ts";
-import { BridgeFatalError, errorMessage, isCrash, isSpoolError, TurnError } from "../core/errors.ts";
+import { stat } from "node:fs/promises";
+import { BridgeFatalError, errorMessage, isCrash, isErrno, isSpoolError, TurnError } from "../core/errors.ts";
 import { FATAL_REASON, TURN_ERROR, type AnswerSnapshot, type Phase, type TurnOutcome, type TurnTask } from "../core/types.ts";
 import type { BridgeConfig } from "../config.ts";
-import type { Pacer } from "../pace/pace.ts";
+import { typingSharesMs, type Pacer } from "../pace/pace.ts";
 import { aliveAge, isCancelled } from "../protocol/alive.ts";
 import { LeasePulser, stillOwned } from "../protocol/claim.ts";
 import { checkJournal, journalSend } from "../protocol/journal.ts";
@@ -151,9 +152,9 @@ class TurnEngine {
     if (gate.warn) {
       this.log.event(EVENT.PACE_WARN, `в часовом окне ${gate.sentInWindow} отправок (жёлтый порог ${this.deps.pacer.cfg.hourlyWarn})`);
     }
-    const delayMs = this.deps.pacer.delayFor(task.text, this.deps.clock.now());
+    const delayMs = this.deps.pacer.delayFor(task.text, this.deps.clock.now(), this.cfg.inputMode === "chunks");
     if (delayMs > 0) {
-      this.log.event(EVENT.PACE_PAUSE, `пауза темпа ${Math.round(delayMs / 1000)} с перед набором (П-2)`);
+      this.log.event(EVENT.PACE_PAUSE, `пауза темпа ${Math.round(delayMs / 1000)} с перед набором (П-2${this.cfg.inputMode === "chunks" ? ", набор идёт физически — У-3" : ""})`);
       const cause = await this.pause(delayMs, { challenge: true });
       this.deps.crash?.("pace-wait");
       if (cause) return await this.closeCancelled(cause, false);
@@ -163,7 +164,11 @@ class TurnEngine {
     await this.toPhase("typing");
     this.deps.crash?.("typing");
     for (let attempt = 0; ; attempt++) {
-      await this.deps.driver.typeText(task.text);
+      if (this.cfg.inputMode === "chunks") {
+        await this.typeInChunks(task.text); // У-3: порционный ввод
+      } else {
+        await this.deps.driver.typeText(task.text);
+      }
       this.typed = true;
       if (normalizeText(await this.deps.driver.composerText()) === normalizeText(task.text)) break;
       await this.deps.driver.clearComposer();
@@ -174,6 +179,10 @@ class TurnEngine {
 
     const stopCause = await this.guard(); // отмена до отправки — стереть поле (Ф-1)
     if (stopCause) return await this.closeCancelled(stopCause, false);
+
+    // R4 (У-1, П-6): капча могла появиться во время набора — последняя проверка
+    // до точки невозврата; в паузах набора она проверялась периодически (У-3)
+    await this.checkChallenge();
 
     // ── ТОЧКА НЕВОЗВРАТА (birdview §2): state=sending → journal → клик ──
     await this.toPhase("sending");
@@ -205,7 +214,11 @@ class TurnEngine {
     }
     const written = await writeResult(this.dir, { status: "ok", markdown: answer, traceId: task.traceId });
     if (!written) throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, "результат уже создан другим исполнителем", false);
-    await this.toPhase("result");
+    // Результат опубликован: клиент получил status=ok и вправе ack+dispose в любой момент,
+    // в том числе между любыми двумя fs-операциями ниже. Финализирующие фазы
+    // переносят штатное исчезновение каталога как завершение хода (доработка
+    // ревью PR #9 P1); перехват эпохи при живом каталоге остаётся фатальным.
+    await this.toPhaseFinal("result");
     this.deps.pacer.recordSuccess();
     await this.deps.metrics.record({ kind: "ok", ms: this.deps.clock.now() - startedAt }, task.id).catch(() => {});
     this.log.event(EVENT.TURN_OK, `ответ отдан (${answer.length} символов markdown)`);
@@ -213,8 +226,11 @@ class TurnEngine {
 
     // ── подтверждён: плагин атомарно переименовал result.json (birdview §2) ──
     if (await this.waitAck()) {
-      await this.toPhase("confirmed");
       this.log.event(EVENT.TURN_ACK, "плагин подтвердил результат");
+      // фаза confirmed — через финализирующую запись: плагин вправе удалить
+      // каталог сразу после ack (birdview §2), и исчезновение каталога между
+      // проверкой и записью фазы — завершение хода, а не утрата владения
+      await this.toPhaseFinal("confirmed");
     } else if (!this.deps.stop.stopped) {
       this.log.event(EVENT.TURN_ACK_TIMEOUT, `нет result.ack за ${this.cfg.ackWaitMs / 1000} с — каталог хода оставлен плагину`);
     }
@@ -237,6 +253,46 @@ class TurnEngine {
       throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `владение утрачено при записи фазы ${phase}`, false);
     }
     this.log.event(EVENT.TURN_PHASE, `фаза: ${phase}`, { phase });
+  }
+
+  /**
+   * Финализирующая фаза — пишется ПОСЛЕ публикации result.json (доработка ревью
+   * PR #9 P1). Клиент получил статус и вправе ack+dispose в любой момент, поэтому
+   * штатное исчезновение каталога (ENOENT) в этой зоне — завершение хода: фазу
+   * уже некуда писать, ответ доставлен. true — фаза записана; false — каталог
+   * удалён плагином после ack, ход завершён без записи фазы.
+   *
+   * Один stat ничего не гарантирует: клиент успевает удалить каталог между
+   * любыми двумя операциями, поэтому исчезновение проверяется заново на каждом
+   * шаге (перед записью, в ошибке записи, при повторной проверке владения), а не
+   * единожды заранее. Реальные ошибки EACCES/EIO остаются наружу — spool
+   * недоступен (birdview §3); перехват эпохи при живом каталоге остаётся
+   * фатальным OWNERSHIP_LOST; удалённый spool не пересоздаётся.
+   */
+  private async toPhaseFinal(phase: Phase): Promise<boolean> {
+    if (!(await pathExists(this.dir))) return false; // каталог удалён до фазы
+    if (!(await stillOwned(this.dir, this.epoch))) {
+      // наш claim исчез, пока мы проверяли: каталог могли удалить (штатно) или
+      // перехватить (фатально) — различает только повторная проверка каталога
+      if (!(await pathExists(this.dir))) return false;
+      throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `эпоха ${this.epoch} больше не максимальная при фазе ${phase}`, false);
+    }
+    this.deps.crash?.("before-state-write");
+    try {
+      await writeState(this.dir, this.epoch, phase);
+    } catch (error) {
+      // каталог исчез ровно между проверкой и open tmp — это ENOENT с каталогом,
+      // которого больше нет; повторная проверка отделяет штатное удаление от spool
+      if (isErrno(error, "ENOENT") && !(await pathExists(this.dir))) return false;
+      throw error;
+    }
+    this.deps.crash?.("after-state-write");
+    if (!(await stillOwned(this.dir, this.epoch))) {
+      if (!(await pathExists(this.dir))) return false; // удалён между записью и проверкой
+      throw new BridgeFatalError(FATAL_REASON.OWNERSHIP_LOST, `владение утрачено при записи фазы ${phase}`, false);
+    }
+    this.log.event(EVENT.TURN_PHASE, `фаза: ${phase}`, { phase });
+    return true;
   }
 
   /**
@@ -295,6 +351,7 @@ class TurnEngine {
     const challenge = await this.deps.driver.challenge();
     if (challenge) {
       this.log.event(EVENT.CHALLENGE, `${challenge.kind}: ${challenge.detail} — мост прекращает отправки (П-6)`);
+      await this.deps.metrics.recordResistance("challenge").catch(() => {}); // У-6
       throw new BridgeFatalError(FATAL_REASON.CHALLENGE, challenge.detail);
     }
   }
@@ -322,11 +379,41 @@ class TurnEngine {
         throw new BridgeFatalError(FATAL_REASON.LEFT_DOMAIN, `вкладка ушла из домена платформы (Ф-7)`);
       }
       await this.checkChallenge();
+      // У-2: «невидимая» защита не рисует DOM — но видна на транспорте:
+      // 403/429 от API чата — тот же фатальный путь, что капча (П-6)
+      const resistance = this.deps.probe?.resistance() ?? null;
+      if (resistance) {
+        this.log.event(EVENT.CHALLENGE, `network ${resistance.status} на API-эндпоинтах (сигналов: ${resistance.count}) — мост прекращает отправки (П-6, У-2)`);
+        await this.deps.metrics.recordResistance("challenge").catch(() => {}); // У-6
+        throw new BridgeFatalError(FATAL_REASON.CHALLENGE, `платформа отвечает ${resistance.status} на API-эндпоинты чата (сетевой сигнал сопротивления, П-6)`);
+      }
       const markdown = htmlToMarkdown(snapshot.html);
       const streamIdle = this.deps.probe ? this.deps.probe.idleMs() > 1_500 : undefined;
       if (detector.push({ busy: snapshot.busy, sendIdle: snapshot.sendIdle, text: markdown, streamIdle }, this.deps.clock.now()) === "complete") {
         return detector.stableText;
       }
+    }
+  }
+
+  /** У-3: порционный ввод — текст по предложениям, интервалы из charsPerSec + джиттер
+   *  (П-1/П-5). Один общий бюджет набора полного сообщения распределён по порциям,
+   *  включая первую (R5 ревью PR #10): потолок maxTypingMs — на сообщение, не на
+   *  порцию, время набора платит стена и в базу паузы не входит (У-3, П-1).
+   *  В паузах проверяется капча (R4); свой ввод учитывается с первой порции (R2):
+   *  отмена между порциями стирает уже набранное, чтобы остаток не выглядел
+   *  чужим черновиком (Н-4). */
+  private async typeInChunks(text: string): Promise<void> {
+    const chunks = splitChunks(text);
+    const shares = typingSharesMs(chunks, this.cfg.pace, this.deps.rand.next());
+    for (const [index, chunk] of chunks.entries()) {
+      const chunkMs = shares[index] ?? 0;
+      if (chunkMs > 0) {
+        this.log.event(EVENT.PACE_PAUSE, `порция ввода ${Math.round(chunkMs / 1000)} с (У-3)`);
+        const cause = await this.pause(chunkMs, { challenge: true }); // R4: капча проверяется в паузах набора
+        if (cause) throw new CancelledDuringWait(cause, false); // до отправки: поле наш, сотрём
+      }
+      this.typed = true; // R2: свой ввод — с первой порции
+      await this.deps.driver.appendText(chunk); // R3: привязка проверяет адаптер драйвера на каждой записи
     }
   }
 
@@ -344,11 +431,17 @@ class TurnEngine {
     }
   }
 
-  /** Ожидание result.ack (фаза «подтверждён»); мягкая остановка прекращает ожидание. */
+  /**
+   * Ожидание result.ack (фаза «подтверждён»); мягкая остановка прекращает ожидание.
+   * Исчезновение каталога хода тоже означает подтверждение: удалять его плагин
+   * вправе только после ack (birdview §2) — иначе мост висел бы здесь до конца
+   * ackWaitMs, блокируя очередь уже ЗАКРЫТОГО хода.
+   */
   private async waitAck(): Promise<boolean> {
     const deadline = this.deps.clock.now() + this.cfg.ackWaitMs;
     for (;;) {
       if (await hasAck(this.dir)) return true;
+      if (!(await pathExists(this.dir))) return true; // удалён после ack — подтверждено
       if (this.deps.stop.stopped) return false;
       if (this.deps.clock.now() >= deadline) return false;
       await this.deps.clock.sleep(Math.min(this.cfg.cancelPollMs, deadline - this.deps.clock.now()));
@@ -430,6 +523,44 @@ class CancelledDuringWait extends Error {
   }
 }
 
+/**
+ * Разбивка текста на порции ввода (У-3): предложения, длинные — по словам.
+ * Разделители сохраняются — конкатенция порций равна исходному тексту (Ф-4).
+ */
+export function splitChunks(text: string, maxLen = 200): string[] {
+  const bounds: number[] = [];
+  for (const match of text.matchAll(/[.!?…]+["»)]?(?=\s)/g)) {
+    bounds.push(match.index + match[0].length + 1); // граница после одного пробела-разделителя
+  }
+  const pieces: string[] = [];
+  let start = 0;
+  for (const bound of bounds) {
+    if (bound > start) {
+      pieces.push(text.slice(start, bound));
+      start = bound;
+    }
+  }
+  if (start < text.length) pieces.push(text.slice(start));
+  const chunks: string[] = [];
+  for (const piece of pieces) {
+    if (piece.length <= maxLen) {
+      if (piece) chunks.push(piece);
+      continue;
+    }
+    let current = "";
+    for (const token of piece.split(/(?<=\s)/)) { // слова с хвостовым пробелом — срез сохраняет текст
+      if (current.length + token.length > maxLen && current) {
+        chunks.push(current);
+        current = token;
+      } else {
+        current += token;
+      }
+    }
+    if (current) chunks.push(current);
+  }
+  return chunks.length ? chunks : [text];
+}
+
 /** Сбой драйвера распознаётся структурно: Error с полем kind (driverFailure()). */
 function isDriverFailure(error: unknown): error is DriverFailure {
   return (
@@ -445,4 +576,15 @@ function fieldsLogger(log: Logger, fields: { trace: string; turn: string }): Log
     event: (code, message, extra) => log.event(code, message, { ...fields, ...extra }),
     raw: (message) => log.raw(message),
   };
+}
+
+/** Существует ли путь: строго по ENOENT, недоступность spool — наружу (birdview §3). */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return false;
+    throw error;
+  }
 }

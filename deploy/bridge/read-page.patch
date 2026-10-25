@@ -1,22 +1,23 @@
+diff --git a/src/driver/chatgpt.ts b/src/driver/chatgpt.ts
+index fa1ec23..2a834ed 100755
 --- a/src/driver/chatgpt.ts
 +++ b/src/driver/chatgpt.ts
-@@ -139 +138,0 @@
+@@ -167 +166,0 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
 -}
-@@ -141,10 +140,11 @@
+@@ -169,3 +168,3 @@ function readPage(input: { sel: PlatformProfile["selectors"]; domain: string }):
 -function visibleIn(selector: string): boolean {
 -  return [...document.querySelectorAll(selector)].some((el) => isVisible(el));
 -}
--
++  function visibleIn(selector: string): boolean {
++    return [...document.querySelectorAll(selector)].some((el) => isVisible(el));
++  }
+@@ -173,6 +172,7 @@ function visibleIn(selector: string): boolean {
 -/** Видим ли элемент: без display:none/visibility:hidden, с непустой геометрией. */
 -function isVisible(el: Element): boolean {
 -  if ((el as HTMLElement).hidden === true || el.getAttribute("aria-hidden") === "true") return false;
 -  const style = document.defaultView?.getComputedStyle(el);
 -  if (style && (style.display === "none" || style.visibility === "hidden")) return false;
 -  return el.getClientRects().length > 0;
-+  function visibleIn(selector: string): boolean {
-+    return [...document.querySelectorAll(selector)].some((el) => isVisible(el));
-+  }
-+
 +  /** Видим ли элемент: без display:none/visibility:hidden, с непустой геометрией. */
 +  function isVisible(el: Element): boolean {
 +    if ((el as HTMLElement).hidden === true || el.getAttribute("aria-hidden") === "true") return false;
