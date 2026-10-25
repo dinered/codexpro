@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "githubRepository": "dinered/codexpro",
+  "gitlabProjectId": 27,
+  "issues": [
+    { "githubNumber": 1, "gitlabIid": 8 },
+    { "githubNumber": 2, "gitlabIid": 9 },
+    { "githubNumber": 3, "gitlabIid": 10 },
+    { "githubNumber": 4, "gitlabIid": 11 },
+    { "githubNumber": 5, "gitlabIid": 12 },
+    { "githubNumber": 6, "gitlabIid": 13 },
+    { "githubNumber": 7, "gitlabIid": 14 }
+  ],
+  "pullRequests": [
+    { "githubNumber": 8, "gitlabIid": 12 },
+    { "githubNumber": 9, "gitlabIid": 13 }
+  ],
+  "gitlabOnlyIssue": { "gitlabIid": 7, "githubNumber": 11 },
+  "excluded": [
+    {
+      "kind": "pull_request",
+      "githubNumber": 10,
+      "reason": "No one-to-one GitLab MR mapping is verified; MR !15 is an omnibus and MR !14 is contextual."
+    }
+  ]
+}
