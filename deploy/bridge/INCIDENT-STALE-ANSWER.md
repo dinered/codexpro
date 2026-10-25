@@ -1,9 +1,11 @@
 # Unconfirmed submission returned the previous answer — 2026-10-24
 
-Status: open, correction not deployed. Follow-up:
+Status: correction deployed from `52a07ce`; two consecutive native messages,
+including multiline input, passed live acceptance on 2026-10-25. Follow-up:
 [issue #7](http://gitlab.home.arpa/ai-company/codexpro/-/work_items/7).
 The deployment from [MR !9](http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/9)
-is merged, but reliable consecutive-message operation remains unaccepted.
+is merged. Its historical failure below is retained; current identities and
+bounded acceptance evidence are in [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md).
 
 ## What was observed
 
@@ -60,10 +62,18 @@ used in diagnosis.
 
 ## Runtime and retained evidence
 
-Running router source: `d928d7a0b9c546a9862601437a634ee2a0df630a`.
-Image: `sha256:e4bbe3a1ea90904acb00ee41a61271bd1258dd25508eb98a1f318131de25d345`.
+Historical router source: `d928d7a0b9c546a9862601437a634ee2a0df630a`.
+Historical image: `sha256:e4bbe3a1ea90904acb00ee41a61271bd1258dd25508eb98a1f318131de25d345`.
 MR !9 merge: `310f926b9c8ec8cf2389480ca12b4595b0093e7a`.
 This documentation does not replace the running image.
+
+The installed correction requires a newly accepted user turn and its next new
+assistant turn; uncertain sending fails without resend. Its packaged regression
+deliberately leaves the second message unsent and refuses the old answer. Two
+authorized real messages produced distinct expected answers in the same Chrome
+conversation and in Paseo. Multiline task text, DOM identities and trace-matched
+acknowledgements were checked. The live check did not deliberately induce an
+ineffective Enter; see [the acceptance record](evidence/20261025-head52-live.json).
 
 Canonical records under `data/codexpro-deploy-20261024/` include
 `consecutive-send-dom-evidence.json`, `live-acceptance-voice-idle.json`,

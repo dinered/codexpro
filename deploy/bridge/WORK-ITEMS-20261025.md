@@ -2,7 +2,9 @@
 
 Продолжение существующего [Draft MR !22](http://gitlab.home.arpa/ai-company/codexpro/-/merge_requests/22),
 поверх его исходной головы `0fb183368271fdee3477e9d134d9bec52e69714e`.
-Изменения подготовлены для review; установка и живая приёмка не выполнены.
+Изменения `52a07ce` установлены: два последовательных сообщения, включая
+многострочное, прошли живую приёмку в одном чате Chrome/Paseo. Точные identities
+и границы проверки — [DEPLOYMENT-STATUS.md](DEPLOYMENT-STATUS.md).
 Текущая целевая архитектура по последнему поручению — отдельные browser/router
 containers и native provider Paseo. Сохранённый вариант `Dockerfile.paseo`,
 entrypoint и host installer — историческая альтернатива; её запуск не согласован.
@@ -16,9 +18,9 @@ MR !15 (`16797daa`); MR !9 (`310f926`) содержит прежнюю deploy/pr
 
 | GitLab issue | Классификация и подтверждённое состояние | Остаток |
 | --- | --- | --- |
-| [#3](http://gitlab.home.arpa/ai-company/codexpro/-/issues/3) supervised live harness | Существующее разрешённое направление; живая приёмка отложена. `tests/e2e` содержит прежние bridge/Paseo сценарии, отдельного проекта `live` и `docs/live-tests.md` в текущем дереве нет. | Полный harness/runbook по записанным требованиям ещё не доставлен. Реальный прогон требует разрешённого теста и разрешения вопроса старой очереди. |
-| [#6](http://gitlab.home.arpa/ai-company/codexpro/-/issues/6) метаданные | Продолжено: provider передаёт в `task.text` тело штатного сообщения Paseo. Синтетические provider/protocol проверки добавлены. | Независимое review и установка provider; реальная пересылка этой ревизией не проверялась. |
-| [#7](http://gitlab.home.arpa/ai-company/codexpro/-/issues/7) прежний ответ | Продолжено: per-send подтверждение нового user turn и принадлежащего ему assistant turn; негативный сценарий проведён через protocol-v3 engine. | Review, immutable image/config packet, отдельная runtime-приёмка. Открытый production дефект пока не объявляется исправленным в установленной системе. |
+| [#3](http://gitlab.home.arpa/ai-company/codexpro/-/issues/3) supervised live harness | Два разрешённых реальных сообщения прошли в новом чате, включая multiline; DOM и protocol ack сверены. | Полный harness/runbook по исходным требованиям ещё не доставлен; ограниченный live-прогон его не заменяет. |
+| [#6](http://gitlab.home.arpa/ai-company/codexpro/-/issues/6) метаданные | Exact provider `52a07ce` установлен. Оба реальных `task.text` совпали с исходными сообщениями, служебной обёртки нет, multiline сохранён. | Все способы пользовательского ввода живым прогоном не покрыты; synthetic quoting/notification проверки сохранены. |
+| [#7](http://gitlab.home.arpa/ai-company/codexpro/-/issues/7) прежний ответ | Exact image `71d5e66f…` установлен. Два последовательных сообщения получили свои новые ответы в том же чате; новый DOM turn и trace-matched ack подтверждены. | Умышленно неотправленный второй запрос проверен packaged synthetic regression; живого отказа Enter не провоцировали и не повторяли. |
 | [#8](http://gitlab.home.arpa/ai-company/codexpro/-/issues/8) У-1 | Уже реализовано в reference: кандидаты challenge, видимость, `/auth/login`, unit/contract tests. | Полная browser-проверка каждого реального артефакта отсутствует; native binding также может отклонить навигацию до детектора challenge. |
 | [#9](http://gitlab.home.arpa/ai-company/codexpro/-/issues/9) У-2 | Уже реализовано в reference: свой origin + `/backend-api/`, 403/429, fatal CHALLENGE, off по умолчанию; contract test 19. | `runtime/router.ts` пока передаёт `probe: null`, поэтому включение `network_probe` в native router не подключает этот механизм. 30x burst из предложения также не реализован. Новая интеграция в эту контрольную точку не добавлена. |
 | [#10](http://gitlab.home.arpa/ai-company/codexpro/-/issues/10) У-3 | Уже реализовано: instant/chunks, единый бюджет набора, сверка Ф-4, отмена/challenge между порциями; `BoundDriver.appendText` проверяет привязку каждой порции. | Живой chunks-прогон не выполнялся; по умолчанию instant. |
@@ -71,14 +73,16 @@ Paseo продолжает распознавать происхождение, 
 `sh deploy/bridge/check.sh` проверяет patched reference, deployment TypeScript,
 binding/serialization/provider-engine/Send/submission fixtures. Тест #7 использует
 сериализованный evaluator и DOM fixture, затем настоящий protocol-v3 engine;
-это не доказательство живого поведения Chrome. Browser fixture обновлён для
-нового identity-контракта, его запуск в этой среде недоступен.
+это не доказательство живого поведения Chrome. Обновлённый per-chat-browser fixture
+в этой поставке не повторялся; отдельная живая приёмка двух сообщений описана
+в текущем [статусе установки](DEPLOYMENT-STATUS.md).
 
 Оба Dockerfile используют одинаковые актуальные reference checksums и шесть
 overlays; в историческом `Dockerfile.paseo` устранены устаревшие pins и пропуски
-idle/Send overlays. Docker image build и host installer не запускались.
-Host installer/restart/security/profile migration остаются за отдельным review
-архитектуры и конкретного runtime packet.
+idle/Send overlays. Sidecar image `71d5e66f…` собран и проверен nonroot;
+17 packaged regressions PASS. Provider и только router обновлены по прямому
+поручению оператора, браузер и Paseo сохранены. Host installer исторической
+all-in альтернативы не запускался.
 
 Проверка `node --test tools/docs-check/markers.test.mjs` выявила три существующих
 сбоя на неизменённых файлах: пропуск раздела 24 в каталоге, пути `ChattyMy-bridge`
@@ -86,7 +90,10 @@ Host installer/restart/security/profile migration остаются за отде
 этой поставкой не вводились. CI текущего проекта проверяет smoke/sync jobs,
 поэтому его green отдельно не доказывает работоспособность Web Bridge.
 
-По последнему handoff router приостановлен; старый cancel-only spool item
-`20261025T120431Z-lcx5ms` не имеет acknowledged result. Его содержимое,
-профиль, старые failed/cancelled turns и рабочий primary checkout сохраняются.
-Возобновление/очистка очереди и реальный prompt в эту поставку не входят.
+Router сообщает ready. По прямому разрешению оператора старый cancel-only
+item `20261025T120431Z-lcx5ms` перенесён из spool в quarantine: три файла и
+их hashes сохранены, fake ack/result не создавались. Все 107 файлов 15 старых
+acknowledged задач сохранены; ровно два новых реальных теста завершились ok.
+Устаревший общий запрет в active brief снят оператором; повторные согласования
+рутинных обратимых действий в текущем объёме не требуются. Технические учебные
+предохранители, limits и отказ от resend сохранены.
