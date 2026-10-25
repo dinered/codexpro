@@ -81,17 +81,26 @@ export function typingTimeMs(textLength: number, cfg: PaceConfig): number {
  * бюджет на ПОЛНОЕ сообщение — typingTimeMs всей длины (потолок maxTypingMs
  * соблюдён внутри) с джиттером, растянутым один раз за сообщение, — делится
  * между порциями пропорционально их длине, включая первую. Сумма долей равна
- * бюджету (остаток округления уходит последней порции). Двойной оплаты нет:
+ * бюджету, каждая доля неотрицательна. Двойной оплаты нет:
  * в chunks время набора исключено из базы паузы (typingPhysical), его платит
  * стена через эти доли. Одна порция получает весь бюджет целиком.
  */
 export function typingSharesMs(chunks: string[], cfg: PaceConfig, jitterDraw: number): number[] {
   const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  if (totalLength === 0) return chunks.map(() => 0);
   const total = Math.round(typingTimeMs(totalLength, cfg) * (1 + cfg.jitter * jitterDraw));
-  const shares = chunks.map((chunk) => Math.round((chunk.length / Math.max(1, totalLength)) * total));
-  const allocated = shares.reduce((sum, share) => sum + share, 0);
-  if (shares.length > 0) shares[shares.length - 1]! += total - allocated; // остаток округления — последней порции
-  return shares;
+  let lengthThrough = 0;
+  let allocatedThrough = 0;
+  // Округляем накопленную длительность, а не каждую порцию независимо.
+  // Границы монотонны: даже при числе порций больше бюджета в миллисекундах
+  // не возникает отрицательного остатка, который typeInChunks пропустил бы.
+  return chunks.map((chunk) => {
+    lengthThrough += chunk.length;
+    const through = Math.round((lengthThrough / totalLength) * total);
+    const share = through - allocatedThrough;
+    allocatedThrough = through;
+    return share;
+  });
 }
 
 /** База паузы (П-2): max(minIntervalMs, время набора). Джиттер применяется поверх. */

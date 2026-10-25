@@ -180,3 +180,23 @@ test("typingSharesMs (R5): пустые порции и пустой списо�
   assert.deepEqual(typingSharesMs([], cfg, 0), []);
   assert.deepEqual(typingSharesMs([""], cfg, 0), [0]);
 });
+
+test("typingSharesMs: много коротких и пустых порций — целые неотрицательные доли, один бюджет", () => {
+  for (const count of [0, 1, 2, 5, 2_000]) {
+    const chunks = ["", ...Array.from({ length: count }, () => "A. "), ""];
+    for (const maxTypingMs of [0, 1, 7, 1_000]) {
+      for (const draw of [0, 0.5, 1]) {
+        const cfg: PaceConfig = { ...DEFAULT_PACE, charsPerSec: 1, maxTypingMs, jitter: 0.5 };
+        const shares = typingSharesMs(chunks, cfg, draw);
+        const budget = Math.round(typingTimeMs(chunks.join("").length, cfg) * (1 + cfg.jitter * draw));
+        assert.equal(shares.length, chunks.length);
+        assert.ok(shares.every((ms) => Number.isInteger(ms) && ms >= 0), `count=${count}, budget=${budget}: отрицательная доля`);
+        assert.equal(shares.filter((ms) => ms > 0).reduce((sum, ms) => sum + ms, 0), budget,
+          "именно оплачиваемая положительная сумма равна единому бюджету");
+        assert.equal(shares[0], 0, "пустая порция не платит");
+        assert.equal(shares.at(-1), 0, "пустой хвост не получает остаток округления");
+      }
+    }
+  }
+  assert.deepEqual(typingSharesMs(["", ""], { ...DEFAULT_PACE, charsPerSec: 0 }, 0), [0, 0]);
+});
