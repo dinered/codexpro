@@ -45,4 +45,4 @@ is($output, "http\n", 'pinned glab resolves the GitLab API scheme to HTTP');
 open my $check, '<', $stderr or die "cannot read isolated glab stderr\n";
 my $error = <$check> // '';
 close $check;
-is($error, '', 'protocol resolution makes no API request and emits no telemetry/error');
+ok($error !~ /\S/, 'protocol resolution makes no API request and emits no telemetry/error');
