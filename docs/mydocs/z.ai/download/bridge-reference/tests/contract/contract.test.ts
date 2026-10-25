@@ -445,124 +445,106 @@ test("контракт 16: сигнал оператора до отправки
   }
 });
 
-test("контракт 17: клиент ack+dispose сразу — очередь не ждёт ackWait закрытого хода", async () => {
-  // Три детерминированных interleaving штатного ack+dispose (ревью PR #9 P2):
-  //   А «до-опроса»       — клиент подтверждает и удаляет каталог ДО первого
-  //                         ack-опроса моста: waitAck видит только пустоту;
-  //   Б «stat-confirmed»  — dispose между stat каталога (pathExists → true) и
-  //                         записью фазы confirmed: ровно окно гонки turn.ts;
-  //   В «result-фаза»     — dispose между публикацией result.json и записью
-  //                         фазы result: клиент получил status=ok и вправе
-  //                         закрыть ход, мост ещё пишет фазу.
-  // Бюджет второго хода короче ackWait: движок, дожидающийся полного
-  // TURN_ACK_TIMEOUT, в бюджет не укладывается. Точные утверждения: TURN_ACK
-  // именно первого хода, ни одного TURN_ACK_TIMEOUT, ни одного BRIDGE_FATAL.
-  await assertAckDisposeRace("до-опроса");
-  await assertAckDisposeRace("stat-confirmed");
-  await assertAckDisposeRace("result-фаза");
+test("контракт 17: клиент ack+dispose сразу — очередь не ждёт ackWait закрытого хода", async (t) => {
+  // Отдельные последовательные subtests: stat перехватывается глобально, а каждый
+  // interleaving должен выполняться и при неудаче предыдущего сценария.
+  for (const scenario of ["до-опроса", "stat-confirmed", "result-фаза"] as const) {
+    await t.test(scenario, () => assertAckDisposeRace(scenario));
+  }
 });
 
-/** Один interleaving контракта 17: свой стенд, свой перехват stat, свои утверждения. */
+/** Штатный ack+dispose в выбранном окне между fs-операциями финализации. */
 async function assertAckDisposeRace(scenario: "до-опроса" | "stat-confirmed" | "result-фаза"): Promise<void> {
   const ctx = await makeCtx({ generationMs: 100 });
-  // ackWait заметно больше бюджета второго хода: старое ожидание полного
-  // тайм-аута не проходит утверждение «второй ход исполнен» (ревью PR #9 P2).
-  // Бюджет 8 с покрывает ход с запасом (пауза темпа ≤1 с + окно стабильности
-  // детектора ~5 с) и заведомо короче ackWait
   const ackWaitMs = 20_000;
-  const secondBudgetMs = 8_000;
+  // Проверяем освобождение очереди по фактической отправке следующего хода.
+  // Полное завершение ответа имеет собственное окно стабильности и бюджет:
+  // его длительность не доказывает, ждал ли мост ack первого хода.
+  const continuationBudgetMs = 8_000;
+  const completionBudgetMs = 60_000;
+  const nativeStat = fsp.stat;
+  let run: Run | undefined;
+  const failures: unknown[] = [];
   try {
     const first = await ctx.client.put("первый ход", ALIVE);
     const dir = join(ctx.root, first.id);
     const claimPath = join(dir, "claim.1");
-    const run = bridgeFor(ctx, undefined, { ackWaitMs });
-
-    // Детерминированный перехват stat (как в ревью-скрипте): в выбранной точке
-    // клиент штатно делает ack → dispose. Условие срабатывания отделяет нужный
-    // вызов от всех прочих stat — перехват срабатывает ровно один раз.
-    const nativeStat = fsp.stat.bind(fsp) as (path: unknown, ...rest: unknown[]) => Promise<unknown>;
     let disposed = false;
-    const ackExists = async (): Promise<boolean> => {
+    let intercepts = 0;
+    const firstAcked = (): boolean => ctx.lines.some((line) => line.includes("TURN_ACK ") && line.includes(first.id));
+    const exists = async (path: string): Promise<boolean> => {
       try {
-        await nativeStat(join(dir, "result.ack"));
+        await nativeStat(path);
         return true;
-      } catch {
-        return false;
-      }
-    };
-    const resultExists = async (): Promise<boolean> => {
-      try {
-        await nativeStat(join(dir, "result.json"));
-        return true;
-      } catch {
-        return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
       }
     };
     const disposeNow = async (): Promise<void> => {
-      await ackResult(dir); // штатный порядок протокола: ack → dispose (birdview §2)
+      // Тот же порядок, что у клиента: подтверждение → удаление, без force.
+      assert.equal(await ackResult(dir), true, "результат подтверждён ровно этим клиентом");
       await ctx.client.dispose(first.id);
       disposed = true;
     };
-    const intercept = async (path: unknown, ...rest: unknown[]): Promise<unknown> => {
+    fsp.stat = (async (path: unknown, ...rest: unknown[]): Promise<unknown> => {
       const matches =
-        typeof path === "string" &&
-        ((scenario === "до-опроса" && path === join(dir, "result.ack") && (await resultExists())) ||
-          (scenario === "stat-confirmed" && path === dir && (await ackExists())) ||
-          (scenario === "result-фаза" && path === claimPath && (await resultExists())));
-      if (!matches) return nativeStat(path, ...rest);
+        !disposed && intercepts === 0 && typeof path === "string" &&
+        ((scenario === "до-опроса" && path === join(dir, "result.ack") && (await exists(join(dir, "result.json")))) ||
+          (scenario === "stat-confirmed" && path === dir && firstAcked()) ||
+          (scenario === "result-фаза" && path === claimPath && (await exists(join(dir, "result.json")))));
+      if (!matches) return Reflect.apply(nativeStat, fsp, [path, ...rest]);
+      intercepts += 1;
       if (scenario === "до-опроса") {
-        // dispose ДО опроса: мост увидит только исчезнувший каталог
+        // После result-фазы, но до первого ack-опроса: мост увидит ENOENT.
         await disposeNow();
-        return nativeStat(path).catch(() => {
-          throw Object.assign(new Error("result.ack отсутствует"), { code: "ENOENT" });
-        });
+        return Reflect.apply(nativeStat, fsp, [path, ...rest]);
       }
-      // dispose между stat и следующим await моста: stat вернёт «каталог был»,
-      // а все последующие проверки увидят пустоту
-      const info = await nativeStat(path);
-      await disposeNow();
-      return info;
-    };
-    fsp.stat = intercept as typeof fsp.stat;
-    syncBuiltinESMExports();
-
-    try {
-      await pump(ctx, async () => (await readResult(dir)) !== null);
+      const info = await Reflect.apply(nativeStat, fsp, [path, ...rest]);
       if (scenario === "stat-confirmed") {
-        // штатный порядок: клиент сначала читает и ПОДТВЕРЖДАЕТ результат, мост
-        // видит ack и идёт писать фазу confirmed — dispose встанет ровно между
-        // stat каталога и следующей проверкой (ревью PR #9 P1, turn.ts)
-        const confirmed = await ctx.client.waitResult(first.id, 5_000);
-        assert.equal(confirmed?.status, "ok", "сценарий stat-confirmed: клиент не получил результат");
+        // ack ранее выполнен waitResult; TURN_ACK уже записан мостом.
+        await ctx.client.dispose(first.id);
+        disposed = true;
+      } else {
+        await disposeNow();
       }
-      assert.ok(await pump(ctx, () => disposed, 5_000), `сценарий ${scenario}: перехват не сработал`);
+      return info;
+    }) as typeof fsp.stat;
+    syncBuiltinESMExports();
+    run = bridgeFor(ctx, undefined, { ackWaitMs });
 
-      // мост обязан распознать подтверждение (ack или удаление каталога после ack)
-      // и продолжить очередь; фатального останова быть не должно ни в каком из сценариев
-      const second = await ctx.client.put("второй ход сразу", ALIVE);
-      const ok = await pump(ctx, async () => (await readResult(join(ctx.root, second.id))) !== null, secondBudgetMs);
-      assert.ok(ok, `сценарий ${scenario}: второй ход не исполнен за ${secondBudgetMs} мс (бюджет короче ackWait)`);
-      const got = await readResult(join(ctx.root, second.id));
+    // result-фаза может удалить result до того, как тест успеет его опросить.
+    // Такое расписание завершает ожидание по disposed, а не ждёт 120 с пустоту.
+    assert.ok(await pump(ctx, async () => disposed || (await readResult(dir)) !== null), "первый результат не опубликован");
+    if (scenario === "stat-confirmed") {
+      const got = await ctx.client.waitResult(first.id, 5_000);
       assert.equal(got?.status, "ok");
-      assert.equal(ctx.driver.sendCount, 2);
-      assert.ok(
-        ctx.lines.some((line) => line.includes("TURN_ACK ") && line.includes(first.id)),
-        `сценарий ${scenario}: подтверждение первого хода не распознано точным событием TURN_ACK`,
-      );
-      assert.ok(
-        !ctx.lines.some((line) => line.includes("TURN_ACK_TIMEOUT")),
-        `сценарий ${scenario}: закрытый ход дождался TURN_ACK_TIMEOUT — мост ждал ackWait`,
-      );
-      assert.ok(
-        !ctx.lines.some((line) => line.includes("BRIDGE_FATAL")),
-        `сценарий ${scenario}: штатный ack+dispose остановил мост:\n${ctx.lines.filter((line) => line.includes("BRIDGE_FATAL")).join("\n")}`,
-      );
-    } finally {
-      fsp.stat = nativeStat as unknown as typeof fsp.stat;
-      syncBuiltinESMExports();
-      await stopBridge(ctx, run);
     }
+    assert.ok(await pump(ctx, () => disposed, 5_000), `сценарий ${scenario}: перехват не сработал`);
+    assert.equal(intercepts, 1, `сценарий ${scenario}: ровно один заданный interleaving`);
+
+    const second = await ctx.client.put("второй ход сразу", ALIVE);
+    await pump(ctx, () => ctx.driver.sendCount === 2 || run!.settled, continuationBudgetMs);
+    assert.equal(ctx.driver.sendCount, 2,
+      `FAST_CONTINUATION ${scenario}: очередь не отправила второй ход за ${continuationBudgetMs} мс < ackWait=${ackWaitMs}; disposed=${disposed}, intercepts=${intercepts}, settled=${run.settled}\n${ctx.lines.join("\n")}`);
+    assert.ok(await pump(ctx, async () => (await readResult(join(ctx.root, second.id))) !== null, completionBudgetMs),
+      `сценарий ${scenario}: второй ответ не завершён\n${ctx.lines.join("\n")}`);
+    assert.equal((await ctx.client.waitResult(second.id, 5_000))?.status, "ok");
+    assert.ok(firstAcked(), `сценарий ${scenario}: нет точного TURN_ACK первого id`);
+    assert.ok(!ctx.lines.some((line) => line.includes("TURN_ACK_TIMEOUT")), `сценарий ${scenario}: недопустимый TURN_ACK_TIMEOUT`);
+    assert.ok(!ctx.lines.some((line) => line.includes("BRIDGE_FATAL")), `сценарий ${scenario}: недопустимый BRIDGE_FATAL`);
+  } catch (error) {
+    failures.push(error);
   } finally {
-    await cleanup(ctx);
+    fsp.stat = nativeStat;
+    syncBuiltinESMExports();
+    // Ошибки остановки/удаления остаются видимы, но не заменяют первую ошибку
+    // assertions. В AggregateError первичная причина всегда первая.
+    if (run) {
+      try { await stopBridge(ctx, run); } catch (error) { failures.push(error); }
+    }
+    try { await cleanup(ctx); } catch (error) { failures.push(error); }
   }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, `сценарий ${scenario}: ошибка проверки и очистки`);
 }

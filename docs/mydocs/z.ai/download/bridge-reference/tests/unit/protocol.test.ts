@@ -146,7 +146,10 @@ test("result: создаётся ровно один раз (O_EXCL), ack пер
     void waitForAck(dir, 1_000, clock).then((value) => {
       timedOut = !value;
     });
-    for (let i = 0; i < 30 && !timedOut; i++) await clock.advanceAsync(200);
+    for (let i = 0; i < 30 && !timedOut; i++) {
+      await clock.advanceAsync(200);
+      await new Promise((resolve) => setTimeout(resolve, 5)); // let real stat I/O settle, as driveUntil does
+    }
     assert.ok(timedOut, "waitForAck возвращает false по истечении лимита");
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -13,7 +13,6 @@ import { createLogger } from "../../src/core/log.ts";
 import { PluginClient } from "../../plugin-client/client.ts";
 import { writeResult, ackResult, hasAck } from "../../src/protocol/result.ts";
 import { RESULT_FILE } from "../../src/protocol/names.ts";
-import type { TurnResult } from "../../src/core/types.ts";
 
 async function makeClient(seed = 1): Promise<{ root: string; clock: ManualClock; client: PluginClient }> {
   const root = await mkdtemp(join(tmpdir(), "plugin-client-"));
@@ -61,18 +60,12 @@ test("два читателя одного хода: результат отда
   try {
     const task = await client.put("ход с двумя читателями", { aliveEveryMs: 2_000 });
     await writeResult(join(root, task.id), { status: "ok", markdown: "ответ", traceId: "t" });
-    let readByFirst: TurnResult | null | undefined;
-    let readBySecond: TurnResult | null | undefined;
-    void client.waitResult(task.id, 5_000, 100).then((value) => {
-      readByFirst = value;
-    });
-    void second.waitResult(task.id, 5_000, 100).then((value) => {
-      readBySecond = value;
-    });
-    for (let i = 0; i < 100 && (readByFirst === undefined || readBySecond === undefined); i++) {
-      await clock.advanceAsync(100);
-    }
-    assert.ok(readByFirst !== undefined && readBySecond !== undefined, "оба читателя завершились");
+    // Результат уже опубликован: оба читателя завершают реальное FS-чтение и
+    // гонку rename без продвижения ManualClock быстрее, чем работает диск.
+    const [readByFirst, readBySecond] = await Promise.all([
+      client.waitResult(task.id, 5_000, 100),
+      second.waitResult(task.id, 5_000, 100),
+    ]);
     assert.equal((readByFirst !== null) !== (readBySecond !== null), true, "ровно один читатель получил результат");
     assert.ok(await hasAck(join(root, task.id)), "result.ack создан");
   } finally {

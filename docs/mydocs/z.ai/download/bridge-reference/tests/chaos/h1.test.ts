@@ -72,12 +72,19 @@ async function chaosIteration(seed: number): Promise<void> {
   const log = createLogger(() => {}, () => clock.now());
   const rand = new SeededRandom(seed);
   const client = new PluginClient(root, clock, new SeededRandom(seed + 9000), log);
+  const stop = { stopped: false };
+  const workers: { done: Promise<unknown>; settled: () => boolean }[] = [];
+  // ManualClock advances promises, but real filesystem work also needs event-loop time.
+  // Match the existing driveUntil harness rather than outrunning lease/alive I/O.
+  const tick = async (ms: number) => {
+    await clock.advanceAsync(ms);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  };
   try {
     const task = await client.put(`задача ${seed}`, { aliveEveryMs: 2_000 });
     const dir = join(root, task.id);
     const driver = new HumanDriver({ generationMs: 1_200 }, clock);
     const config = testConfig(root, { pace: { minIntervalMs: 1_500, jitter: 0.1 } });
-    const stop = { stopped: false };
 
     const makeBridge = (chaosRand: Random, p: number): { done: Promise<unknown>; settled: () => boolean } => {
       const fired = new Set<string>();
@@ -105,13 +112,15 @@ async function chaosIteration(seed: number): Promise<void> {
           return { crashed: true } as unknown; // смерть процесса: мост просто исчез
         },
       );
-      return { done, settled: () => settled };
+      const worker = { done, settled: () => settled };
+      workers.push(worker);
+      return worker;
     };
 
     // мост A: падает с вероятностью 0.4 в каждой размеченной точке
     const a = makeBridge(new SeededRandom(seed + 1), 0.4);
     // время идёт, пока мост A жив или не умер
-    for (let i = 0; i < 20; i++) await clock.advanceAsync(500);
+    for (let i = 0; i < 20; i++) await tick(500);
 
     // мост B подключается позже — как рестарт супервизором
     const b = makeBridge(new SeededRandom(seed + 2), 0.3);
@@ -121,7 +130,7 @@ async function chaosIteration(seed: number): Promise<void> {
     };
     let resolved = false;
     for (let i = 0; i < 200 && !resolved; i++) {
-      await clock.advanceAsync(500);
+      await tick(500);
       resolved = (await readResult(dir)) !== null;
       // оба моста мертвы и аренда протухла — дожидаться цикла впустую не нужно:
       // ход отдаём финализатору сразу (это работа, а не ожидание)
@@ -133,7 +142,7 @@ async function chaosIteration(seed: number): Promise<void> {
     if (!resolved) {
       finisherDone = makeBridge(new SeededRandom(seed + 3), 0).done;
       for (let i = 0; i < 200 && !resolved; i++) {
-        await clock.advanceAsync(500);
+        await tick(500);
         resolved = (await readResult(dir)) !== null;
       }
     }
@@ -161,8 +170,13 @@ async function chaosIteration(seed: number): Promise<void> {
     await b.done;
     await finisherDone;
   } finally {
+    stop.stopped = true;
     client.close();
-    await rm(root, { recursive: true, force: true });
+    for (let i = 0; i < 40 && workers.some((w) => !w.settled()); i++) await tick(1000);
+    assert.ok(workers.every((w) => w.settled()), "workers must stop before removing the temporary spool");
+    await Promise.all(workers.map((w) => w.done));
+    // Already-issued heartbeat writes may finish after their timers are stopped.
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
   }
 }
 
