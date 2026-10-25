@@ -1,19 +1,22 @@
-# Discussion sync planner
+# Discussion sync
 
-`plan.mjs` is a read-only planner for the reviewed GitHub/GitLab issue and PR/MR mapping in `mappings.json`. It also inventories every currently unmapped issue and PR/MR and their discussion/review records so the plan cannot silently omit a source object.
+`plan.mjs` is the detailed read-only inventory/planner. It covers every current GitHub issue/PR and GitLab issue/MR, mapped comment candidates, inline discussions, review snapshots, state-copy candidates and unmapped counterpart proposals. It explicitly selects GitHub/GitLab API hosts, bounds API calls to 20 seconds and page scans to 100 pages, and emits hashes and metadata without comment bodies.
+
+`sync.pl` is the Perl 5 + core `JSON::PP` execution path for the shared shell runner, which does not have Node. It writes only ordinary comments on existing mapped objects: the current authorized first backfill contains 19 candidates. It emits the complete informational counterpart, status-copy and unmapped-discussion proposal snapshots as read-only rows; it does not create issues/PRs/MRs, close objects, replay review votes, merge, or delete. The proposal snapshots are retained so the 19-comment plan cannot hide unmapped project history; refresh them from a reviewed live inventory before a later scope change.
+
+The local commands use existing authenticated CLI helpers and never print token values:
 
 ```sh
 node tools/discussion-sync/plan.mjs --github-cli /home/paseo/.local/bin/gh
-```
-
-The planner uses explicitly addressed GitHub and GitLab hosts through the authenticated `gh` and `glab` CLIs. It bounds each CLI call and pagination to 20 seconds and 100 pages. Output is deterministic and contains metadata plus body hashes, never comment text. Exact generated informational envelopes are trusted only when the target API author matches the configured service actor and the hash of the enclosed original body matches the marker. Embedded, quoted, malformed, actor-mismatched, or edited envelopes are conflicts. Stable IDs include the service host and full project identity. GitLab inline notes are excluded from ordinary note rows and represented once through their discussion/thread metadata. The command does not create comments or issues/MRs.
-
-Tests:
-
-```sh
+perl tools/discussion-sync/sync.pl
+perl tools/discussion-sync/core.test.pl
 node --test tools/discussion-sync/plan.test.mjs
 ```
 
-No original author, timestamp, approval or merge state is recreated. The current row plan is still read-only. Any writer must re-fetch and hash the source immediately before each write, preserve an idempotent origin marker on the remote mirror as the durable mapping/checkpoint, stop on concurrent target edits, represent source edits as attributed revisions, and default to dry-run. FirstMate must review the exact row plan before backfill.
+`sync.pl` defaults to read-only. It emits a SHA-256 plan hash bound to current mapped source body hashes, implementation code, mapping and proposal files. An apply requires all of these explicit gates: `--apply`, `DISCUSSION_SYNC_ENABLED=true`, the matching `DISCUSSION_SYNC_EXPECTED_PLAN_SHA256`, and `DISCUSSION_SYNC_WRITE_CAPABILITY_CONFIRMED=true`. The CI job additionally runs only on protected `main` from a web or schedule pipeline, and is disabled unless `DISCUSSION_SYNC_ENABLED=true`; its default is `DISCUSSION_SYNC_APPLY=0`.
 
-The shared `merge-train-smoke` runner does not provide Node, so it cannot execute `node --test` for this planner. Do not treat its existing `smoke` or `sync-github-test` jobs as planner tests. Recurring integration remains gated until a CI-compatible functional runner path and the exact additional GitHub Issues/Pull requests write capabilities have been established.
+Before each create/revision, the writer re-fetches the exact source comment and verifies its body hash, re-reads target comments, and fails on malformed/edited target markers. It emits an attributed envelope with the original author, timestamp and permalink; the actual API actor remains the writer. A strict terminal marker containing forge/project/object/comment identity and source-body hash is the durable mapping/checkpoint. A valid marker prevents echo and makes retries after partial failure idempotent. Source edits create an attributed revision; target edits become conflicts. Attachments stay in manual review. A local lock plus GitLab `resource_group` serializes this writer's invocations; third-party writers do not participate in that lock.
+
+CI uses `GH_TOKEN`/`GITLAB_TOKEN` process environment populated from existing `GITHUB_SYNC_TOKEN`/`GITLAB_SYNC_TOKEN`; credentials are not placed in argv or output. The existing GitHub credential needs repository-scoped **Issues: read/write** and **Pull requests: read/write** for comment API operations. Before an apply, a maintainer must confirm those grants and set the capability-confirmation gate; no token value is read. GitLab project API access is required for notes. Local runs continue to use the current `gh`/`glab` authentication helpers.
+
+The CI job `discussion-sync-test` runs functional tests for marker validation, loop prevention, retries/revisions/conflicts, UTF-8 hashing, and bounded pagination without needing credentials or Node. Node planner tests remain available locally for the exhaustive row planner.

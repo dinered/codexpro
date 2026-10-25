@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "readOnly": true,
+  "rows": [
+    {
+      "objectKind": "issue",
+      "githubNumber": 1,
+      "githubState": "closed",
+      "gitlabIid": 8,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "issue",
+      "githubNumber": 2,
+      "githubState": "closed",
+      "gitlabIid": 9,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "issue",
+      "githubNumber": 3,
+      "githubState": "closed",
+      "gitlabIid": 10,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "issue",
+      "githubNumber": 4,
+      "githubState": "closed",
+      "gitlabIid": 11,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "issue",
+      "githubNumber": 5,
+      "githubState": "closed",
+      "gitlabIid": 12,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "issue",
+      "githubNumber": 6,
+      "githubState": "closed",
+      "gitlabIid": 13,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "issue",
+      "githubNumber": 7,
+      "githubState": "closed",
+      "gitlabIid": 14,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    },
+    {
+      "objectKind": "pull_request",
+      "githubNumber": 8,
+      "githubState": "merged",
+      "gitlabIid": 12,
+      "gitlabState": "open",
+      "sourceCanonical": "github",
+      "proposedTarget": "gitlab",
+      "proposedAction": "close_stale_intake_copy_only_after provenance/body/no-independent-work verification",
+      "automaticMutation": false
+    }
+  ]
+}
