@@ -8,7 +8,7 @@ import {messageText} from './message-text.ts';
 const capabilities = ['prompt.message', 'session.persistence'] as const;
 const models = [{id: 'chatgpt', label: 'ChatGPT (постоянная вкладка Chrome)'}];
 type Options = {root?: string; pollMs?: number; pulseMs?: number; heartbeatTtlMs?: number; writeTask?: typeof put; registerChat?: typeof register};
-type Active = {turnId: string; id: string; traceId: string; dir: string; timer?: ReturnType<typeof setTimeout>; pulser?: ReturnType<typeof setInterval>; deadline: number; cancelRequested: boolean};
+type Active = {turnId: string; id: string; traceId: string; dir: string; timer?: ReturnType<typeof setTimeout>; pulser?: ReturnType<typeof setInterval>; deadline: number; cancelRequested: boolean; interrupts: Set<string>};
 type Session = {key: string; cwd: string; active: Active | null};
 export function createProvider(options: Options = {}): ProviderRegistration {
   const root = options.root ?? process.env.CODEXPRO_STATE_DIR ?? join(homedir(), '.paseo', 'codexpro');
@@ -24,10 +24,17 @@ function connection(root: string, supported: string[], options: Options): Provid
   const emit = (event: ProviderEvent) => { if (!closed) for (const listener of listeners) listener(event); };
   const heartbeatTtl = options.heartbeatTtlMs ?? 20_000;
   const stopTimers = (active: Active) => { clearTimeout(active.timer); clearInterval(active.pulser); };
+  function finishInterrupts(active: Active, error?: string) {
+    for (const requestId of active.interrupts) emit(error
+      ? {type: 'request.failed', requestId, error: {message: error}}
+      : {type: 'request.completed', requestId});
+    active.interrupts.clear();
+  }
   function terminal(sessionId: string, session: Session, active: Active, state: 'completed' | 'failed' | 'canceled', error?: string) {
     if (session.active !== active) return;
     stopTimers(active); session.active = null;
     emit({type: 'session.turn', sessionId, turnId: active.turnId, state, ...(error ? {error: {message: error}} : {})});
+    finishInterrupts(active);
   }
   async function poll(sessionId: string, session: Session, active: Active) {
     if (closed || session.active !== active) return;
@@ -58,7 +65,7 @@ function connection(root: string, supported: string[], options: Options): Provid
     if (!taskText.trim()) return reject('Message is empty');
     if (!await ready(root, heartbeatTtl)) return reject('Browser bridge is stopped; complete manual login and start it');
     if (closed || session.active || sessions.get(sessionId) !== session) return reject('Session changed while preparing the turn');
-    const active: Active = {turnId: randomUUID(), id: '', traceId: '', dir: '', deadline: Date.now() + 35 * 60_000, cancelRequested: false};
+    const active: Active = {turnId: randomUUID(), id: '', traceId: '', dir: '', deadline: Date.now() + 35 * 60_000, cancelRequested: false, interrupts: new Set()};
     session.active = active;
     try {
       Object.assign(active, await (options.writeTask ?? put)(root, session.key, taskText));
@@ -69,7 +76,7 @@ function connection(root: string, supported: string[], options: Options): Provid
       emit({type: 'session.turn', sessionId, turnId: active.turnId, state: 'started'});
       active.pulser = setInterval(() => { const now = new Date(); void utimes(join(active.dir, 'alive'), now, now).catch(error => { void cancel(active.dir).catch(() => {}); terminal(sessionId, session, active, 'failed', String(error)); }); }, options.pulseMs ?? 10_000);
       void poll(sessionId, session, active);
-    } catch (error) { if (closed || sessions.get(sessionId) !== session || session.active !== active) return; session.active = null; reject(String(error)); }
+    } catch (error) { if (closed || sessions.get(sessionId) !== session || session.active !== active) return; session.active = null; finishInterrupts(active, String(error)); reject(String(error)); }
   }
   async function dispatch(input: ProviderInput) {
     if (closed) return;
@@ -95,13 +102,26 @@ function connection(root: string, supported: string[], options: Options): Provid
       }
       case 'session.prompt': return prompt(input);
       case 'session.interrupt': {
-        const active = sessions.get(input.sessionId)?.active;
-        if (active) { active.cancelRequested = true; if (active.dir) await cancel(active.dir); }
+        const session = sessions.get(input.sessionId), active = session?.active;
+        if (active) {
+          active.cancelRequested = true;
+          if (active.dir) await cancel(active.dir);
+          if (closed || sessions.get(input.sessionId) !== session) throw new Error('Session closed during interruption');
+          // Paseo may force-cancel its visible turn after an acknowledged interrupt.
+          // The cancel file only requests cancellation; acknowledge after terminal().
+          if (session.active === active) { active.interrupts.add(input.requestId); return; }
+        }
         emit({type: 'request.completed', requestId: input.requestId}); return;
       }
       case 'session.close': {
-        const session = sessions.get(input.sessionId);
-        if (session?.active) { session.active.cancelRequested = true; if (session.active.dir) await cancel(session.active.dir); stopTimers(session.active); session.active = null; }
+        const session = sessions.get(input.sessionId), active = session?.active;
+        if (active) {
+          active.cancelRequested = true;
+          if (active.dir) await cancel(active.dir);
+          stopTimers(active);
+          finishInterrupts(active, 'Session closed during interruption');
+          if (session.active === active) session.active = null;
+        }
         sessions.delete(input.sessionId);
         emit({type: 'session.closed', sessionId: input.sessionId}); emit({type: 'request.completed', requestId: input.requestId}); return;
       }

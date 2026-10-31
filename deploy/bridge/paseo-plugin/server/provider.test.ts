@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {mkdtemp, readdir, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readdir, readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -12,10 +12,10 @@ async function waitUntil(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 3000;
   while (!await check()) { assert.ok(Date.now() < deadline, 'timed out'); await delay(5); }
 }
-async function fixture() {
+async function fixture(options: Parameters<typeof createProvider>[0] = {}) {
   const root = await mkdtemp(join(tmpdir(), 'paseo-v3-provider-'));
   await atomic(join(root, 'router.json'), {state: 'ready'});
-  const registration = createProvider({root, pollMs: 5, pulseMs: 20});
+  const registration = createProvider({root, pollMs: 5, pulseMs: 20, ...options});
   const connection = await registration.connect({versions: [1], capabilities: ['prompt.message', 'session.persistence']});
   const events: ProviderEvent[] = []; connection.onEvent(event => events.push(event));
   const send = async (input: ProviderInput) => { await connection.send(input); };
@@ -213,4 +213,156 @@ test('closing during registration cannot emit stale ready after reopening', asyn
     assert.equal(events.filter(e => e.type === 'session.ready' && e.requestId === 'old-open').length, 0);
     assert.equal(events.filter(e => e.type === 'session.opened' && e.requestId === 'old-open').length, 0);
   } finally { release(); await connection.close(); }
+});
+
+test('interrupt completion follows the terminal result, even beyond the Paseo cancellation grace period', async () => {
+  const f = await fixture();
+  try {
+    const saved = await f.open('A');
+    await f.send(message('A', 'original'));
+    await waitUntil(() => f.events.some(e => e.type === 'session.turn' && e.state === 'started'));
+    const spool = join(f.root, 'chats', (saved.persistence.data as {chatKey: string}).chatKey, 'spool');
+    const [id] = await readdir(spool), dir = join(spool, id!);
+    const task = JSON.parse(await readFile(join(dir, 'task.json'), 'utf8'));
+    const interruptIds = ['stop-1', 'stop-2'];
+    for (const requestId of interruptIds) await f.send({type: 'session.interrupt', sessionId: 'A', requestId});
+    await waitUntil(async () => (await readdir(dir)).includes('cancel'));
+    // Paseo 0.12 force-cancels its own turn 2 s after an acknowledged interrupt.
+    await delay(2100);
+    assert.equal(f.events.filter(e => e.type === 'request.completed' && interruptIds.includes(e.requestId)).length, 0);
+    await f.send(message('A', 'overlap'));
+    await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'overlap'));
+    assert.ok(f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'overlap'
+      && e.result.type === 'failed' && e.result.error.message === 'Previous turn is still active'));
+    assert.equal((await readdir(spool)).length, 1);
+    await atomic(join(dir, 'result.json'), {status: 'cancelled', code: 'CANCEL', traceId: task.traceId});
+    await waitUntil(() => f.events.filter(e => e.type === 'request.completed' && interruptIds.includes(e.requestId)).length === 2);
+    const terminalIndex = f.events.findIndex(e => e.type === 'session.turn' && e.state === 'canceled');
+    assert.ok(terminalIndex >= 0);
+    for (const requestId of interruptIds) assert.ok(f.events.findIndex(e => e.type === 'request.completed' && e.requestId === requestId) > terminalIndex);
+    // Settling the old turn must not retry the rejected prompt.
+    assert.equal((await readdir(spool)).length, 1);
+    await f.send(message('A', 'explicit-next'));
+    await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'explicit-next' && e.result.type === 'turn'));
+    assert.equal((await readdir(spool)).length, 2);
+  } finally { await f.connection.close(); }
+});
+
+for (const status of ['ok', 'error', 'cancelled'] as const) {
+  test(`${status} terminal result releases the chat for the next explicit prompt`, async () => {
+    const f = await fixture();
+    try {
+      const saved = await f.open('A');
+      const spool = join(f.root, 'chats', (saved.persistence.data as {chatKey: string}).chatKey, 'spool');
+      for (const id of ['first', 'next']) {
+        await f.send(message('A', id));
+        await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === id && e.result.type === 'turn'));
+        const dirs = await readdir(spool);
+        const dir = (await Promise.all(dirs.map(async d => ({dir: join(spool, d), task: JSON.parse(await readFile(join(spool, d, 'task.json'), 'utf8'))})))).find(d => d.task.text === id)!;
+        await atomic(join(dir.dir, 'result.json'), {status, traceId: dir.task.traceId, ...(status === 'ok' ? {markdown: 'reply'} : {code: 'SYNTHETIC'})});
+        await waitUntil(() => f.events.filter(e => e.type === 'session.turn' && e.state !== 'started').length === (id === 'first' ? 1 : 2));
+      }
+      assert.equal(f.events.filter(e => e.type === 'session.prompt_result' && e.result.type === 'failed').length, 0);
+      assert.equal((await readdir(spool)).length, 2);
+    } finally { await f.connection.close(); }
+  });
+}
+
+for (const outcome of ['result', 'write failure', 'session close'] as const) {
+  test(`interrupt during pending task publication settles on ${outcome}`, async () => {
+    const {put} = await import('./protocol.ts');
+    let entered = false, release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const f = await fixture({writeTask: async (...args) => {
+      entered = true; await gate;
+      if (outcome === 'write failure') throw new Error('Synthetic publication failure');
+      return put(...args);
+    }});
+    try {
+      const saved = await f.open('A');
+      await f.send(message('A', 'pending'));
+      await waitUntil(() => entered);
+      await f.send({type: 'session.interrupt', sessionId: 'A', requestId: 'stop'});
+      // send() queues dispatch; a catalog reply fences the interrupt with no dir yet.
+      await f.send({type: 'catalog', requestId: 'fence'});
+      await waitUntil(() => f.events.some(e => e.type === 'catalog' && e.requestId === 'fence'));
+      assert.equal(f.events.filter(e => e.type === 'request.completed' && e.requestId === 'stop').length, 0);
+      if (outcome === 'session close') {
+        await f.send({type: 'session.close', sessionId: 'A', requestId: 'close'});
+        await waitUntil(() => f.events.some(e => e.type === 'session.closed'));
+      }
+      release();
+      if (outcome === 'write failure') {
+        await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result' && e.result.type === 'failed'));
+      } else {
+        const spool = join(f.root, 'chats', (saved.persistence.data as {chatKey: string}).chatKey, 'spool');
+        let dir = '';
+        await waitUntil(async () => {
+          const [id] = await readdir(spool);
+          if (!id) return false;
+          dir = join(spool, id);
+          return (await readdir(dir)).includes('cancel');
+        });
+        if (outcome === 'result') {
+          const task = JSON.parse(await readFile(join(dir, 'task.json'), 'utf8'));
+          await atomic(join(dir, 'result.json'), {status: 'cancelled', code: 'CANCEL', traceId: task.traceId});
+          await waitUntil(() => f.events.some(e => e.type === 'session.turn' && e.state === 'canceled'));
+        } else {
+          assert.equal(f.events.filter(e => e.type === 'session.turn').length, 0);
+        }
+      }
+      const replies = f.events.filter(e => (e.type === 'request.completed' || e.type === 'request.failed') && e.requestId === 'stop');
+      assert.equal(replies.length, 1);
+      assert.equal(replies[0]!.type, outcome === 'result' ? 'request.completed' : 'request.failed');
+    } finally { release(); await f.connection.close(); }
+  });
+}
+
+for (const outcome of ['router stopped', 'session closed', 'cancel write failure'] as const) {
+  test(`pending interrupt handles ${outcome} without accepting an overlapping task`, async () => {
+    const f = await fixture();
+    try {
+      const saved = await f.open('A');
+      await f.send(message('A', 'original'));
+      await waitUntil(() => f.events.some(e => e.type === 'session.turn' && e.state === 'started'));
+      const spool = join(f.root, 'chats', (saved.persistence.data as {chatKey: string}).chatKey, 'spool');
+      const [id] = await readdir(spool), dir = join(spool, id!);
+      if (outcome === 'cancel write failure') await mkdir(join(dir, 'cancel'));
+      await f.send({type: 'session.interrupt', sessionId: 'A', requestId: 'stop'});
+      if (outcome === 'cancel write failure') {
+        await waitUntil(() => f.events.some(e => e.type === 'request.failed' && e.requestId === 'stop'));
+        await f.send(message('A', 'overlap'));
+        await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'overlap'));
+        assert.ok(f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'overlap'
+          && e.result.type === 'failed' && e.result.error.message === 'Previous turn is still active'));
+      } else {
+        await waitUntil(async () => (await readdir(dir)).includes('cancel'));
+        if (outcome === 'session closed') {
+          await f.send({type: 'session.close', sessionId: 'A', requestId: 'close'});
+          await waitUntil(() => f.events.some(e => e.type === 'session.closed'));
+        } else {
+          await atomic(join(f.root, 'router.json'), {state: 'paused'});
+          await waitUntil(() => f.events.some(e => e.type === 'session.turn' && e.state === 'failed'));
+          await f.send(message('A', 'next'));
+          await waitUntil(() => f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'next'));
+          assert.ok(f.events.some(e => e.type === 'session.prompt_result' && e.clientMessageId === 'next'
+            && e.result.type === 'failed' && e.result.error.message === 'Browser bridge is stopped; complete manual login and start it'));
+        }
+      }
+      const replies = f.events.filter(e => (e.type === 'request.completed' || e.type === 'request.failed') && e.requestId === 'stop');
+      assert.equal(replies.length, 1);
+      assert.equal(replies[0]!.type, outcome === 'router stopped' ? 'request.completed' : 'request.failed');
+      assert.equal((await readdir(spool)).length, 1);
+    } finally { await f.connection.close(); }
+  });
+}
+
+test('interrupting an idle session completes immediately', async () => {
+  const f = await fixture();
+  try {
+    await f.open('A');
+    await f.send({type: 'session.interrupt', sessionId: 'A', requestId: 'idle'});
+    await waitUntil(() => f.events.some(e => e.type === 'request.completed' && e.requestId === 'idle'));
+    assert.equal(f.events.filter(e => e.type === 'session.turn').length, 0);
+  } finally { await f.connection.close(); }
 });
